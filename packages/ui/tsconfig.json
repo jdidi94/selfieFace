@@ -1,0 +1,7 @@
+{
+  "extends": "@lumea/config/tsconfig/react-library.json",
+  "include": ["src"],
+  "compilerOptions": {
+    "rootDir": "src"
+  }
+}

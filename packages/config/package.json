@@ -1,0 +1,12 @@
+{
+  "name": "@lumea/config",
+  "version": "0.0.0",
+  "private": true,
+  "exports": {
+    "./tsconfig/base.json": "./tsconfig/base.json",
+    "./tsconfig/nextjs.json": "./tsconfig/nextjs.json",
+    "./tsconfig/nest.json": "./tsconfig/nest.json",
+    "./tsconfig/react-library.json": "./tsconfig/react-library.json"
+  },
+  "files": ["tsconfig"]
+}

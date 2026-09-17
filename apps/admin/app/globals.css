@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@import "@lumea/ui/styles/tokens.css";
+
+@source "../../../packages/ui/src/**/*.{ts,tsx}";
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+.font-display {
+  font-family: var(--font-display);
+}

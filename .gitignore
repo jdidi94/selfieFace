@@ -1,0 +1,30 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Builds
+dist
+.next
+.turbo
+out
+build
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Prisma
+apps/server/prisma/*.db
+apps/server/prisma/*.db-journal
+
+# IDE / OS
+.idea
+.vscode
+.DS_Store
+*.log
+coverage
+apps/server/uploads/*
+!apps/server/uploads/.gitkeep

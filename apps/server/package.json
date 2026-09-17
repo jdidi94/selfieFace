@@ -1,0 +1,55 @@
+{
+  "name": "@lumea/server",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main.js",
+    "lint": "echo \"no lint yet\"",
+    "prisma:generate": "prisma generate && node ../../scripts/sync-prisma-clients.mjs",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "ts-node --transpile-only prisma/seed.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-ses": "^3.1132.0",
+    "@lumea/types": "workspace:*",
+    "@lumea/utils": "workspace:*",
+    "@lumea/validation": "workspace:^",
+    "@nestjs/common": "^11.0.1",
+    "@nestjs/core": "^11.0.1",
+    "@nestjs/jwt": "^12.0.1",
+    "@nestjs/passport": "^12.0.0",
+    "@nestjs/platform-express": "^11.0.1",
+    "@prisma/client": "^6.1.0",
+    "bcrypt": "^6.0.0",
+    "dotenv": "^17.4.2",
+    "multer": "^2.4.0",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "passport-jwt": "^4.0.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "sharp": "^0.35.4",
+    "stripe": "^22.6.2"
+  },
+  "devDependencies": {
+    "@lumea/config": "workspace:*",
+    "@nestjs/cli": "^11.0.0",
+    "@nestjs/schematics": "^11.0.0",
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^5.0.0",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^22.20.2",
+    "@types/passport-google-oauth20": "^2.0.17",
+    "@types/passport-jwt": "^4.0.1",
+    "@types/stripe": "^8.0.417",
+    "prisma": "^6.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~6.0.3"
+  }
+}

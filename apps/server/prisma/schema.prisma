@@ -1,0 +1,1145 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserType {
+  CUSTOMER
+  ADMIN
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  EDITOR
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum ProductKind {
+  PRODUCT
+  PACK
+}
+
+enum InventoryReason {
+  SALE
+  RESTOCK
+  ADJUSTMENT
+  RETURN
+  TRANSFER
+}
+
+enum Currency {
+  USD
+  TND
+  AED
+}
+
+/// Storefront / admin market window (3 independent catalogs + settings).
+enum MarketCode {
+  AE
+  TN
+  OTHER
+}
+
+enum Locale {
+  en
+  ar
+  fr
+}
+
+enum JournalArticleStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum PromoBannerPlacement {
+  HOME_HERO
+  HOME_SECONDARY
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CouponType {
+  PERCENT
+  FIXED
+}
+
+/// How product filters apply when computing the discountable subtotal.
+enum CouponProductScope {
+  ALL
+  INCLUDE
+  EXCLUDE
+}
+
+enum MerchandisingRailKind {
+  TOP
+  NEW
+  INCOMING
+  TOP_PACKS
+}
+
+enum BehaviorEventType {
+  SEARCH
+  PRODUCT_CLICK
+}
+
+model SchemaMeta {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// One of three commercial windows: Emirates (AED), Tunisia (TND), rest of world (USD).
+model Market {
+  id                   String                  @id @default(cuid())
+  code                 MarketCode              @unique
+  name                 String
+  currency             Currency
+  enabled              Boolean                 @default(true)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  settings             StoreSettings?
+  products             Product[]
+  promoBanners         PromoBanner[]
+  coupons              Coupon[]
+  shippingMethods      ShippingMethod[]
+  promotions           Promotion[]
+  merchandisingItems   MerchandisingRailItem[]
+  orders               Order[]
+  categories           Category[]
+  brands               Brand[]
+  warehouses           Warehouse[]
+  journalArticles      JournalArticle[]
+  searchInsights       SearchInsight[]
+}
+
+model User {
+  id              String     @id @default(cuid())
+  email           String     @unique
+  passwordHash    String?
+  googleId        String?    @unique
+  type            UserType
+  adminRole       AdminRole?
+  firstName       String?
+  lastName        String?
+  /// Set when the customer confirms their email (or trusts Google OAuth).
+  emailVerifiedAt DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  customer                 Customer?
+  refreshTokens            RefreshToken[]
+  passwordResetTokens      PasswordResetToken[]
+  emailVerificationTokens  EmailVerificationToken[]
+  oauthExchangeTokens      OAuthExchangeToken[]
+}
+
+model Customer {
+  id                String    @id @default(cuid())
+  userId            String?   @unique
+  user              User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phone             String?
+  /// Guest checkout contact email (registered customers use User.email).
+  email             String?
+  isGuest           Boolean   @default(false)
+  preferredLocale   Locale?
+  preferredCurrency Currency?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  carts             Cart[]
+  orders            Order[]
+  addresses         Address[]
+  reviews           Review[]
+  wishlistItems     WishlistItem[]
+  couponRedemptions CouponRedemption[]
+  stockNotifySubscriptions StockNotifySubscription[]
+  loyaltyAccount    LoyaltyAccount?
+
+  @@index([phone])
+  @@index([email])
+  @@index([isGuest])
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model OAuthExchangeToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Category {
+  id           String                @id @default(cuid())
+  name         String
+  /// Unique within a market window.
+  slug         String
+  description  String?
+  sortOrder    Int                   @default(0)
+  marketId     String
+  market       Market                @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  products     Product[]
+  translations CategoryTranslation[]
+
+  @@unique([marketId, slug])
+  @@index([marketId])
+}
+
+model CategoryTranslation {
+  id          String   @id @default(cuid())
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  locale      Locale
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([categoryId, locale])
+  @@index([locale])
+}
+
+model Brand {
+  id           String             @id @default(cuid())
+  name         String
+  /// Unique within a market window.
+  slug         String
+  description  String?
+  /// Public brand photo / logo URL (admin-editable string for P0)
+  imageUrl     String?
+  marketId     String
+  market       Market             @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  products     Product[]
+  translations BrandTranslation[]
+
+  @@unique([marketId, slug])
+  @@index([marketId])
+}
+
+model BrandTranslation {
+  id          String   @id @default(cuid())
+  brandId     String
+  brand       Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  locale      Locale
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([brandId, locale])
+  @@index([locale])
+}
+
+model Product {
+  id               String               @id @default(cuid())
+  name             String
+  /// Unique within a market window (same slug may exist in AE / TN / OTHER).
+  slug             String
+  status           ProductStatus        @default(DRAFT)
+  /// PRODUCT = standard SKU; PACK = bundle of existing variants
+  kind             ProductKind          @default(PRODUCT)
+  shortDescription String?
+  description      String?
+  benefits         String?
+  howToUse         String?
+  suitableFor      String?
+  categoryId       String
+  category         Category             @relation(fields: [categoryId], references: [id])
+  brandId          String
+  brand            Brand                @relation(fields: [brandId], references: [id])
+  /// Required market window — catalogs are separate (no copy between markets).
+  marketId         String
+  market           Market               @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  popularityScore  Int                  @default(0)
+  isIncoming       Boolean              @default(false)
+  incomingAt       DateTime?
+  /// Free-form tags for filtering / coupon rules (e.g. "skincare", "spf", "new")
+  tags             String[]             @default([])
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  variants         ProductVariant[]
+  images           ProductImage[]
+  translations     ProductTranslation[]
+  reviews          Review[]
+  wishlistItems    WishlistItem[]
+  merchandisingItems MerchandisingRailItem[]
+  promotionProducts  PromotionProduct[]
+  journalArticles    JournalArticleProduct[]
+  stockNotifySubscriptions StockNotifySubscription[]
+  packComponents     PackComponent[]    @relation("PackProduct")
+
+  @@unique([marketId, slug])
+  @@index([marketId])
+  @@index([categoryId])
+  @@index([brandId])
+  @@index([status])
+  @@index([kind])
+  @@index([popularityScore])
+  @@index([isIncoming])
+  @@index([createdAt])
+}
+
+model ProductTranslation {
+  id               String   @id @default(cuid())
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  locale           Locale
+  name             String
+  shortDescription String?
+  description      String?
+  benefits         String?
+  howToUse         String?
+  suitableFor      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([productId, locale])
+  @@index([locale])
+}
+
+model ProductVariant {
+  id          String              @id @default(cuid())
+  productId   String
+  product     Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name        String
+  sku         String              @unique
+  /// Denormalized sum of WarehouseStock across active warehouses (storefront/cart/checkout).
+  stock       Int                 @default(0)
+  weightGrams Int?
+  barcode     String?
+  isActive    Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  movements   InventoryMovement[]
+  warehouseStocks WarehouseStock[]
+  prices      VariantPrice[]
+  cartItems   CartItem[]
+  orderItems  OrderItem[]
+  stockNotifySubscriptions StockNotifySubscription[]
+  packUsages  PackComponent[]
+
+  @@index([productId])
+}
+
+/// Physical stock location. Sellable qty = sum of active warehouses per variant.
+model Warehouse {
+  id         String           @id @default(cuid())
+  name       String
+  /// Unique within a market window.
+  code       String
+  line1      String?
+  line2      String?
+  city       String?
+  region     String?
+  postalCode String?
+  country    String?
+  isActive   Boolean          @default(true)
+  /// At most one default per market; checkout allocates from that market’s default first.
+  isDefault  Boolean          @default(false)
+  marketId   String
+  market     Market           @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  stocks     WarehouseStock[]
+  movements  InventoryMovement[]
+  allocations OrderItemAllocation[]
+
+  @@unique([marketId, code])
+  @@index([marketId])
+  @@index([isActive])
+  @@index([marketId, isDefault])
+}
+
+model WarehouseStock {
+  id          String         @id @default(cuid())
+  warehouseId String
+  warehouse   Warehouse      @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  variantId   String
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  quantity    Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([warehouseId, variantId])
+  @@index([variantId])
+  @@index([warehouseId])
+}
+
+/// Line items that make up a PACK product (existing catalog variants).
+model PackComponent {
+  id            String         @id @default(cuid())
+  packProductId String
+  packProduct   Product        @relation("PackProduct", fields: [packProductId], references: [id], onDelete: Cascade)
+  variantId     String
+  variant       ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+  quantity      Int            @default(1)
+  sortOrder     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([packProductId, variantId])
+  @@index([packProductId, sortOrder])
+  @@index([variantId])
+}
+
+model VariantPrice {
+  id              String         @id @default(cuid())
+  variantId       String
+  variant         ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  currency        Currency
+  amount          Int
+  compareAtAmount Int?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  @@unique([variantId, currency])
+  @@index([currency])
+}
+
+model Media {
+  id              String                @id @default(cuid())
+  filename        String
+  mimeType        String
+  size            Int
+  path            String
+  url             String
+  /** Pixel width of stored master (set on image upload when known). */
+  width           Int?
+  /** Pixel height of stored master (set on image upload when known). */
+  height          Int?
+  createdAt       DateTime              @default(now())
+  images          ProductImage[]
+  journalArticles JournalArticle[]
+  journalImages   JournalArticleImage[]
+  promoBanners    PromoBanner[]
+}
+
+model JournalArticle {
+  id           String                      @id @default(cuid())
+  slug         String
+  status       JournalArticleStatus        @default(DRAFT)
+  publishedAt  DateTime?
+  coverMediaId String?
+  coverMedia   Media?                      @relation(fields: [coverMediaId], references: [id], onDelete: SetNull)
+  marketId     String
+  market       Market                      @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt    DateTime                    @default(now())
+  updatedAt    DateTime                    @updatedAt
+  translations JournalArticleTranslation[]
+  gallery      JournalArticleImage[]
+  products     JournalArticleProduct[]
+
+  @@unique([marketId, slug])
+  @@index([marketId, status])
+  @@index([status])
+  @@index([publishedAt])
+}
+
+model JournalArticleImage {
+  id        String         @id @default(cuid())
+  articleId String
+  article   JournalArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media          @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder Int            @default(0)
+  alt       String?
+
+  @@index([articleId])
+}
+
+model JournalArticleProduct {
+  articleId String
+  article   JournalArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sortOrder Int            @default(0)
+
+  @@id([articleId, productId])
+  @@index([productId])
+}
+
+model JournalArticleTranslation {
+  id        String         @id @default(cuid())
+  articleId String
+  article   JournalArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  locale    Locale
+  title     String
+  excerpt   String?
+  body      String
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([articleId, locale])
+  @@index([locale])
+}
+
+model PromoBanner {
+  id           String                  @id @default(cuid())
+  placement    PromoBannerPlacement
+  isActive     Boolean                 @default(true)
+  sortOrder    Int                     @default(0)
+  href         String?
+  imageMediaId String?
+  imageMedia   Media?                  @relation(fields: [imageMediaId], references: [id], onDelete: SetNull)
+  marketId     String
+  market       Market                  @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  startsAt     DateTime?
+  endsAt       DateTime?
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+  translations PromoBannerTranslation[]
+
+  @@index([marketId, placement, isActive])
+  @@index([placement, isActive])
+}
+
+model PromoBannerTranslation {
+  id        String      @id @default(cuid())
+  bannerId  String
+  banner    PromoBanner @relation(fields: [bannerId], references: [id], onDelete: Cascade)
+  locale    Locale
+  title     String
+  subtitle  String?
+  ctaLabel  String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([bannerId, locale])
+  @@index([locale])
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media   @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder Int     @default(0)
+  alt       String?
+
+  @@index([productId])
+}
+
+model InventoryMovement {
+  id            String          @id @default(cuid())
+  variantId     String
+  variant       ProductVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  warehouseId   String?
+  warehouse     Warehouse?      @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+  quantityDelta Int
+  reason        InventoryReason
+  note          String?
+  createdAt     DateTime        @default(now())
+
+  @@index([variantId])
+  @@index([warehouseId])
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum OrderTimelineActorType {
+  SYSTEM
+  ADMIN
+  CUSTOMER
+}
+
+enum PaymentStatus {
+  UNPAID
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+enum ShippingZone {
+  DOMESTIC
+  INTERNATIONAL
+}
+
+model Cart {
+  id                    String     @id @default(cuid())
+  customerId            String?
+  customer              Customer?  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  guestToken            String?    @unique
+  currency              Currency   @default(USD)
+  couponId              String?
+  coupon                Coupon?    @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  /// Points the signed-in customer intends to redeem at checkout (0 = none).
+  loyaltyPointsToRedeem Int        @default(0)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  items                 CartItem[]
+
+  @@index([customerId])
+  @@index([couponId])
+}
+
+model CartItem {
+  id        String         @id @default(cuid())
+  cartId    String
+  cart      Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  quantity  Int
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([cartId, variantId])
+  @@index([variantId])
+}
+
+model Address {
+  id         String    @id @default(cuid())
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String?
+  fullName   String
+  line1      String
+  line2      String?
+  city       String
+  region     String?
+  postalCode String
+  country    String
+  phone      String?
+  isDefault  Boolean   @default(false)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([customerId])
+  @@index([customerId, isDefault])
+}
+
+model Order {
+  id                    String        @id @default(cuid())
+  number                String        @unique
+  customerId            String
+  customer              Customer      @relation(fields: [customerId], references: [id])
+  status                OrderStatus   @default(PENDING)
+  paymentStatus         PaymentStatus @default(UNPAID)
+  currency              Currency
+  locale                Locale        @default(en)
+  marketId              String
+  market                Market        @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  subtotal              Int
+  discount              Int           @default(0)
+  shippingAmount        Int
+  taxAmount             Int
+  total                 Int
+  shippingZone          ShippingZone
+  shippingMethodId      String?
+  shippingMethodCode    String?
+  shippingMethodName    String?
+  shippingFullName      String
+  shippingLine1         String
+  shippingLine2         String?
+  shippingCity          String
+  shippingRegion        String?
+  shippingPostalCode    String
+  shippingCountry       String
+  shippingPhone         String?
+  stripePaymentIntentId String?       @unique
+  stripeRefundId        String?
+  refundedAt            DateTime?
+  refundAmount          Int?
+  /// COD | STRIPE | KONNECT
+  paymentProvider       String?
+  konnectPaymentRef     String?       @unique
+  guestAccessToken      String?       @unique
+  /// Client/header key so retries do not create duplicate orders.
+  idempotencyKey        String?       @unique
+  couponId              String?
+  coupon                Coupon?       @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  couponCode            String?
+  /// Points redeemed on this order (debited when the order is created).
+  loyaltyPointsRedeemed Int           @default(0)
+  /// Points earned after payment becomes eligible (CAPTURED / COD AUTHORIZED).
+  loyaltyPointsEarned   Int           @default(0)
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  items                 OrderItem[]
+  timelineEvents        OrderTimelineEvent[]
+  couponRedemption      CouponRedemption?
+  loyaltyLedger         LoyaltyLedgerEntry[]
+
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([paymentStatus])
+  @@index([currency, createdAt])
+  @@index([marketId, createdAt])
+  @@index([couponId])
+}
+
+model OrderTimelineEvent {
+  id        String                 @id @default(cuid())
+  orderId   String
+  order     Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status    OrderStatus
+  note      String?
+  actorType OrderTimelineActorType @default(SYSTEM)
+  createdAt DateTime               @default(now())
+
+  @@index([orderId])
+}
+
+model OrderItem {
+  id          String         @id @default(cuid())
+  orderId     String
+  order       Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variantId   String
+  variant     ProductVariant @relation(fields: [variantId], references: [id])
+  productName String
+  variantName String
+  sku         String
+  unitPrice   Int
+  quantity    Int
+  lineTotal   Int
+  allocations OrderItemAllocation[]
+
+  @@index([orderId])
+  @@index([variantId])
+}
+
+/// Which warehouse(s) fulfilled a line (may split when stock spans warehouses).
+model OrderItemAllocation {
+  id          String    @id @default(cuid())
+  orderItemId String
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  quantity    Int
+  createdAt   DateTime  @default(now())
+
+  @@index([orderItemId])
+  @@index([warehouseId])
+}
+
+model Review {
+  id         String       @id @default(cuid())
+  productId  String
+  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating     Int
+  title      String?
+  body       String
+  status     ReviewStatus @default(PENDING)
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([productId, customerId])
+  @@index([productId, status])
+  @@index([status])
+}
+
+model StoreSettings {
+  /// Primary key is the market code (AE | TN | OTHER) after multi-window migration.
+  id                        String   @id
+  marketId                  String   @unique
+  market                    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  taxRateBps                Int      @default(0)
+  /// Free shipping offer in this market’s currency. When false, threshold is ignored.
+  freeShippingEnabled       Boolean  @default(true)
+  /// Threshold in minor units of the market currency.
+  freeShippingThreshold     Int      @default(10000)
+  /// Legacy flat rates (fallback if no shipping methods).
+  domesticShipping          Int      @default(500)
+  internationalShipping     Int      @default(1500)
+  domesticCountries         String   @default("TN,AE,US")
+  /// Payment method toggles
+  cashOnDeliveryEnabled     Boolean  @default(true)
+  cardPaymentEnabled        Boolean  @default(true)
+  stripeEnabled             Boolean  @default(true)
+  stripeSecretKey           String?
+  stripePublishableKey      String?
+  konnectEnabled            Boolean  @default(true)
+  konnectApiKey             String?
+  konnectWalletId           String?
+  konnectSandbox            Boolean  @default(true)
+  /// Storefront contact for this market window only.
+  contactWhatsapp                String?
+  contactPhone                   String?
+  contactFacebook                String?
+  contactInstagram               String?
+  contactEmail                   String?
+  /// Alert when variant stock crosses to ≤ this value (admin UI + optional SES).
+  lowStockThreshold         Int      @default(5)
+  /// Loyalty program (store-wide). When false, earn/redeem APIs and UI are off.
+  loyaltyEnabled            Boolean  @default(false)
+  /// Points earned per 1.00 of merchandise (100 minor units), after discounts.
+  loyaltyPointsPerMajorUnit Int      @default(1)
+  /// Discount value of 1 point in currency minor units (e.g. 1 = $0.01).
+  loyaltyPointValueMinor    Int      @default(1)
+  /// Optional minimum merchandise subtotal (minor units) required to redeem.
+  loyaltyMinOrderMinor      Int?
+  /// Optional max redeem as % of post-coupon subtotal in basis points (5000 = 50%).
+  loyaltyMaxRedeemBps       Int?
+  /// Points granted once when a registered customer’s loyalty account is created.
+  loyaltySignupBonusPoints  Int      @default(0)
+  updatedAt                 DateTime @updatedAt
+}
+
+enum LoyaltyLedgerType {
+  EARN_ORDER
+  REDEEM_ORDER
+  SIGNUP_BONUS
+  ADJUST
+  /// Reverse previously earned points (cancel / refund).
+  EARN_REVERSAL
+  /// Restore previously redeemed points (cancel / refund).
+  REDEEM_RESTORE
+}
+
+/// One points wallet per registered (non-guest) customer.
+model LoyaltyAccount {
+  id         String               @id @default(cuid())
+  customerId String               @unique
+  customer   Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  balance    Int                  @default(0)
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  ledger     LoyaltyLedgerEntry[]
+}
+
+model LoyaltyLedgerEntry {
+  id           String            @id @default(cuid())
+  accountId    String
+  account      LoyaltyAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  type         LoyaltyLedgerType
+  /// Signed delta applied to balance (positive = credit, negative = debit).
+  points       Int
+  balanceAfter Int
+  orderId      String?
+  order        Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  note         String?
+  createdAt    DateTime          @default(now())
+
+  @@unique([orderId, type])
+  @@index([accountId, createdAt])
+  @@index([orderId])
+}
+
+/// Customer-selectable shipping speeds (Standard / Express / Priority, etc.).
+model ShippingMethod {
+  id                      String   @id @default(cuid())
+  code                    String
+  name                    String
+  description             String?
+  /// Price in minor units of the market currency.
+  price                   Int      @default(0)
+  sortOrder               Int      @default(0)
+  isActive                Boolean  @default(true)
+  /// When true and cart meets free-shipping threshold, this method is $0.
+  eligibleForFreeShipping Boolean  @default(false)
+  estimatedDaysMin        Int?
+  estimatedDaysMax        Int?
+  marketId                String
+  market                  Market   @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@unique([marketId, code])
+  @@index([marketId, isActive, sortOrder])
+}
+
+/// Product-level campaign (badges / promo rails). Coupons remain cart-level codes.
+model Promotion {
+  id          String             @id @default(cuid())
+  name        String
+  slug        String
+  /// Storefront badge label (e.g. "Promotion", "Summer sale")
+  tag         String
+  description String?
+  startsAt    DateTime?
+  endsAt      DateTime?
+  isActive    Boolean            @default(true)
+  marketId    String
+  market      Market             @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  products    PromotionProduct[]
+
+  @@unique([marketId, slug])
+  @@index([marketId])
+  @@index([isActive])
+  @@index([startsAt, endsAt])
+}
+
+model PromotionProduct {
+  promotionId String
+  productId   String
+  promotion   Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+
+  @@id([promotionId, productId])
+  @@index([productId])
+}
+
+model Coupon {
+  id                 String             @id @default(cuid())
+  code               String
+  type               CouponType
+  /// Customer-facing blurb shown on the storefront coupons bar.
+  description        String?
+  /// Whole percent off (1–100) when type = PERCENT
+  percentOff         Int?
+  /// Fixed discount in minor units of this coupon’s market currency.
+  amountOff          Int?
+  /// Minimum eligible subtotal in minor units of this market currency.
+  minSubtotal        Int?
+  maxUses            Int?
+  maxUsesPerCustomer Int?
+  usedCount          Int                @default(0)
+  startsAt           DateTime?
+  endsAt             DateTime?
+  isActive           Boolean            @default(true)
+  marketId           String
+  market             Market             @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  /// ALL = whole cart; INCLUDE/EXCLUDE = filter by tags, product IDs, and rule helpers
+  productScope       CouponProductScope @default(ALL)
+  /// Tags matched against Product.tags (any overlap)
+  productTags        String[]           @default([])
+  /// Explicit product IDs (any match)
+  productIds         String[]           @default([])
+  /// Helper: only products created within the last 30 days
+  ruleIsNew          Boolean            @default(false)
+  /// Helper: product min USD price (cents) must be >= this
+  ruleMinPriceUsd    Int?
+  /// Helper: approved review average must be >= this (1–5)
+  ruleMinRating      Float?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  carts              Cart[]
+  orders             Order[]
+  redemptions        CouponRedemption[]
+
+  @@unique([marketId, code])
+  @@index([marketId])
+  @@index([isActive])
+}
+
+model CouponRedemption {
+  id         String   @id @default(cuid())
+  couponId   String
+  coupon     Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  orderId    String   @unique
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([couponId, customerId])
+  @@index([customerId])
+}
+
+model WishlistItem {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([customerId, productId])
+  @@index([customerId])
+  @@index([productId])
+}
+
+/// Back-in-stock notify queue. SES emails on 0→N when configured; admin can still mark notified.
+model StockNotifySubscription {
+  id         String          @id @default(cuid())
+  email      String
+  productId  String
+  product    Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId  String?
+  variant    ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  customerId String?
+  customer   Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  locale     Locale          @default(en)
+  notifiedAt DateTime?
+  createdAt  DateTime        @default(now())
+
+  @@index([email])
+  @@index([productId])
+  @@index([variantId])
+  @@index([notifiedAt])
+  @@index([createdAt])
+}
+
+model MerchandisingRailItem {
+  id        String                @id @default(cuid())
+  rail      MerchandisingRailKind
+  productId String
+  product   Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  marketId  String
+  market    Market                @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  sortOrder Int                   @default(0)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@unique([marketId, rail, productId])
+  @@index([marketId, rail, sortOrder])
+}
+
+model SearchInsight {
+  id         String   @id @default(cuid())
+  query      String
+  locale     Locale   @default(en)
+  hitCount   Int      @default(0)
+  lastSeenAt DateTime @default(now())
+  marketId   String
+  market     Market   @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([marketId, query, locale])
+  @@index([marketId, hitCount])
+  @@index([hitCount])
+  @@index([lastSeenAt])
+}
+
+model BehaviorEvent {
+  id        String            @id @default(cuid())
+  type      BehaviorEventType
+  productId String?
+  query     String?
+  locale    Locale?
+  path      String?
+  sessionId String?
+  createdAt DateTime          @default(now())
+
+  @@index([type, createdAt])
+  @@index([productId])
+  @@index([sessionId])
+}
+
+enum EmailLogStatus {
+  SENT
+  FAILED
+  SKIPPED
+}
+
+/// Outbound mail template / category for EmailLog rows.
+enum EmailTemplateType {
+  PASSWORD_RESET
+  EMAIL_VERIFICATION
+  RESTOCK
+  ORDER_CONFIRMATION
+  ORDER_SHIPPED
+  ORDER_DELIVERED
+  ORDER_CANCELLED
+  ADMIN_ORDER_NOTIFY
+  ADMIN_LOW_STOCK
+  MARKETING
+  NEWSLETTER_WELCOME
+  RAW
+}
+
+/// Audit log of outbound SES (and no-op) sends.
+model EmailLog {
+  id                String           @id @default(cuid())
+  to                String
+  subject           String
+  templateType      EmailTemplateType
+  status            EmailLogStatus
+  providerMessageId String?
+  error             String?
+  userId            String?
+  orderId           String?
+  createdAt         DateTime         @default(now())
+
+  @@index([createdAt])
+  @@index([to])
+  @@index([status])
+  @@index([templateType])
+  @@index([userId])
+  @@index([orderId])
+}
+
+enum NewsletterStatus {
+  SUBSCRIBED
+  UNSUBSCRIBED
+}
+
+/// Marketing newsletter list (single opt-in; unsubscribe via signed link).
+model NewsletterSubscriber {
+  id             String           @id @default(cuid())
+  email          String           @unique
+  locale         Locale?
+  status         NewsletterStatus @default(SUBSCRIBED)
+  source         String?
+  subscribedAt   DateTime         @default(now())
+  unsubscribedAt DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status])
+  @@index([subscribedAt])
+  @@index([locale])
+}

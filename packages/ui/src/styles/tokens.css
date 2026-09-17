@@ -1,0 +1,112 @@
+:root {
+  /* Background */
+  --background: #f7f4ef;
+  --surface: #fcfaf7;
+  --surface-muted: #e8ded2;
+  --surface-secondary: #e8ded2;
+
+  /* Brand / accent (Selfieface plum) */
+  --brand: #381f43;
+  --brand-hover: #4a2b56;
+  --accent: #381f43;
+  --accent-soft: #e8ded2;
+  --accent-foreground: #f7f4ef;
+  --ring: #381f43;
+
+  /* Typography */
+  --foreground: #171512;
+  --text: #171512;
+  --text-secondary: #6f6a61;
+  --primary: #171512;
+  --primary-foreground: #f7f4ef;
+  --secondary: #6f6a61;
+  --secondary-foreground: #f7f4ef;
+  --muted: #e8ded2;
+  --muted-foreground: #6f6a61;
+
+  /* Borders */
+  --border: #d8cfc5;
+  --input: #d8cfc5;
+
+  /* Status */
+  --success: #71816b;
+  --destructive: #9a5f62;
+  --destructive-foreground: #f7f4ef;
+  --error: #9a5f62;
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --font-sans: var(--font-sans, "DM Sans", system-ui, sans-serif);
+  --font-display: var(--font-display, "Cormorant Garamond", Georgia, serif);
+}
+
+/* Luxury evening beauty — Selfieface plum accent on warm neutrals */
+html.dark {
+  --background: #171512;
+  --surface: #211d1a;
+  --surface-muted: #2b2623;
+  --surface-secondary: #2b2623;
+
+  --brand: #b08abb;
+  --brand-deep: #381f43;
+  --brand-hover: #c4a3cc;
+  --accent: #b08abb;
+  --accent-soft: #2b2623;
+  --accent-foreground: #171512;
+  --ring: #b08abb;
+
+  --foreground: #f7f4ef;
+  --text: #f7f4ef;
+  --text-secondary: #c9bfb5;
+  --text-muted: #948b82;
+  --primary: #f7f4ef;
+  --primary-foreground: #171512;
+  --secondary: #c9bfb5;
+  --secondary-foreground: #171512;
+  --muted: #2b2623;
+  --muted-foreground: #948b82;
+
+  --border: #3a332e;
+  --input: #3a332e;
+
+  --success: #9bae91;
+  --destructive: #c78386;
+  --destructive-foreground: #f7f4ef;
+  --error: #c78386;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-brand: var(--brand);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}

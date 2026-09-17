@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Media" ADD COLUMN "width" INTEGER;
+ALTER TABLE "Media" ADD COLUMN "height" INTEGER;

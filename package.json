@@ -1,0 +1,29 @@
+{
+  "name": "selfieface",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@lumea/client --filter=@lumea/admin --filter=@lumea/server --filter=@lumea/types --filter=@lumea/utils --filter=@lumea/validation",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @lumea/server prisma:migrate",
+    "db:seed": "pnpm --filter @lumea/server prisma:seed",
+    "postinstall": "pnpm --filter @lumea/types build && pnpm --filter @lumea/utils build && pnpm --filter @lumea/validation build && pnpm --filter @lumea/server prisma:generate"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "~6.0.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "typescript": "~6.0.3"
+    }
+  }
+}
