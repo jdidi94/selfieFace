@@ -409,9 +409,11 @@ This monorepo is **pnpm-only**. `npm install && npm run build` fails (`workspace
 
 For **client** / **admin** on Render (or any host), set:
 
-- `NEXT_PUBLIC_API_URL=https://<your-api-host>/api`
-- `NEST_API_URL=https://<your-api-host>/api` (server-side login BFF; required or login returns empty/JSON errors)
-- `CLIENT_URL` / `ADMIN_URL` / `CORS_ORIGINS` on the API to match your HTTPS storefront URLs
+- `NEXT_PUBLIC_API_URL=https://<your-api-host>/api` — **required at build time** (Next inlines `NEXT_PUBLIC_*`; changing it later needs a redeploy)
+- `NEST_API_URL=https://<your-api-host>/api` — server-side auth BFF only (login/refresh)
+- Do **not** rely on `apps/admin/.env.local` or `apps/client/.env.local` on Render — those files stay on your machine
+- Admin build: `bash scripts/render-build-admin.sh` · start: `bash scripts/render-start-admin.sh`
+- `CLIENT_URL` / `ADMIN_URL` / `CORS_ORIGINS` on the API must match your HTTPS app URLs
 
 Chrome “Dangerous” / “Not secure” on login usually means the site is **HTTP** (password forms) or Safe Browsing flagged the host — serve the apps over **HTTPS** (Render does this by default on `*.onrender.com`).
 

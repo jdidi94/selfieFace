@@ -1,6 +1,6 @@
 import Image from 'next/image';
 
-/** Admin chrome: emblem + Selfieface word (light UI). */
+/** Admin chrome: transparent Selfieface wordmark (no background plate). */
 export function AdminBrandMark({
   className,
   compact,
@@ -9,25 +9,19 @@ export function AdminBrandMark({
   compact?: boolean;
 }) {
   return (
-    <span className={className ?? 'inline-flex items-center gap-2.5'}>
+    <span className={className ?? 'inline-flex items-center'}>
       <Image
-        src="/brand/mark.png"
-        alt=""
-        width={40}
-        height={40}
-        className={compact ? 'h-7 w-7 object-contain' : 'h-8 w-8 object-contain'}
-        aria-hidden
-        priority
-      />
-      <span
+        src="/brand/wordmark_inverted.png"
+        alt="Selfieface"
+        width={compact ? 120 : 160}
+        height={compact ? 80 : 107}
         className={
           compact
-            ? 'font-display text-xl text-foreground'
-            : 'font-display text-2xl text-foreground'
+            ? 'h-8 w-auto object-contain'
+            : 'h-10 w-auto object-contain'
         }
-      >
-        Selfieface
-      </span>
+        priority
+      />
     </span>
   );
 }

@@ -1,19 +1,18 @@
 'use client';
 
-import { useTheme } from '@/lib/theme-context';
 import { cn } from '@lumea/ui';
 import Image from 'next/image';
 import type { ComponentPropsWithoutRef } from 'react';
 
+/** Transparent lockup (no plate) — `wordmark_inverted.png`. */
 const BRAND = {
   mark: '/brand/mark.png',
-  lockupLight: '/brand/lockup-light.png',
-  lockupDark: '/brand/lockup-dark.png',
+  wordmark: '/brand/wordmark_inverted.png',
   name: 'Selfieface',
 } as const;
 
 type BrandLogoProps = {
-  /** `header`: mark + wordmark text; `lockup`: stacked emblem+type; `mark`: emblem only */
+  /** `header` / `lockup`: transparent wordmark; `mark`: emblem only */
   variant?: 'header' | 'lockup' | 'mark';
   className?: string;
   priority?: boolean;
@@ -25,9 +24,6 @@ export function BrandLogo({
   priority,
   ...rest
 }: BrandLogoProps) {
-  const { theme } = useTheme();
-  const dark = theme === 'dark';
-
   if (variant === 'mark') {
     return (
       <span className={cn('inline-flex items-center', className)} {...rest}>
@@ -43,39 +39,19 @@ export function BrandLogo({
     );
   }
 
-  if (variant === 'lockup') {
-    const src = dark ? BRAND.lockupDark : BRAND.lockupLight;
-    return (
-      <span className={cn('inline-flex items-center', className)} {...rest}>
-        <Image
-          src={src}
-          alt={BRAND.name}
-          width={180}
-          height={154}
-          priority={priority}
-          className="h-14 w-auto object-contain sm:h-16"
-        />
-      </span>
-    );
-  }
+  const heightClass =
+    variant === 'lockup' ? 'h-14 w-auto object-contain sm:h-16' : 'h-9 w-auto object-contain sm:h-10';
 
   return (
-    <span
-      className={cn('inline-flex items-center gap-2.5', className)}
-      {...rest}
-    >
+    <span className={cn('inline-flex items-center', className)} {...rest}>
       <Image
-        src={BRAND.mark}
-        alt=""
-        width={40}
-        height={40}
+        src={BRAND.wordmark}
+        alt={BRAND.name}
+        width={180}
+        height={120}
         priority={priority}
-        className="h-8 w-8 shrink-0 object-contain sm:h-9 sm:w-9"
-        aria-hidden
+        className={heightClass}
       />
-      <span className="font-display text-xl font-medium tracking-tight text-foreground sm:text-2xl">
-        {BRAND.name}
-      </span>
     </span>
   );
 }

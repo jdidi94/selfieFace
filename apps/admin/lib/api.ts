@@ -1,8 +1,20 @@
 import { parseApiErrorBody, ApiRequestError, resolveMediaUrl } from '@lumea/utils';
 
-export const nestApiUrl = process.env.NEST_API_URL ?? 'http://localhost:4000/api';
-export const publicApiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+/**
+ * Browser + shared admin API base URL.
+ * Must be NEXT_PUBLIC_* so it is available in client components.
+ * Set this on Render at **build** time (not only runtime) and redeploy.
+ * `.env.local` is never used on Render.
+ */
+export const publicApiUrl = (
+  process.env.NEXT_PUBLIC_API_URL?.trim() ||
+  'http://localhost:4000/api'
+).replace(/\/$/, '');
+
 export const apiUrl = publicApiUrl;
+
+/** @deprecated Use publicApiUrl — NEST_API_URL is server-only and is undefined in the browser. */
+export const nestApiUrl = publicApiUrl;
 
 /** Public media origin (CDN). Falls back unset → serve via API host. */
 export const mediaBaseUrl =
@@ -89,7 +101,7 @@ export async function adminFetch<T>(
     }
   }
 
-  const res = await fetch(`${nestApiUrl}${path}`, {
+  const res = await fetch(`${publicApiUrl}${path}`, {
     ...fetchInit,
     headers: {
       ...(fetchInit.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
