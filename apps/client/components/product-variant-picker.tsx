@@ -10,16 +10,29 @@ import { formatMoney } from '@lumea/utils';
 import { useCart } from '@/lib/cart-context';
 import { useMemo, useState } from 'react';
 
+function stockStatusLabel(
+  stock: number,
+  lowStockThreshold: number,
+  t: ReturnType<typeof getMessages>,
+): string | null {
+  if (stock <= 0) return t.outOfStock;
+  if (stock <= lowStockThreshold) return t.limitedStock;
+  return null;
+}
+
 export function ProductVariantPicker({
   productId,
   variants,
   currency,
   initialVariantId,
+  lowStockThreshold = 5,
 }: {
   productId: string;
   variants: ProductVariantDto[];
   currency: Currency | string;
   initialVariantId?: string;
+  /** From store settings — show “limited stock” at or below this qty. */
+  lowStockThreshold?: number;
 }) {
   const { addItem } = useCart();
   const { openBag } = useStorefrontPanels();
@@ -37,6 +50,7 @@ export function ProductVariantPicker({
   }
 
   const inStock = selected.stock > 0;
+  const stockLabel = stockStatusLabel(selected.stock, lowStockThreshold, t);
 
   async function onAdd() {
     if (!selected || selected.stock <= 0) return;
@@ -86,9 +100,15 @@ export function ProductVariantPicker({
           ))}
         </div>
       </div>
-      <p className="text-sm text-muted-foreground">
-        {inStock ? t.inStock(selected.stock) : t.outOfStock}
-      </p>
+      {stockLabel ? (
+        <p
+          className={`text-sm ${
+            !inStock ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'
+          }`}
+        >
+          {stockLabel}
+        </p>
+      ) : null}
       <div className="hidden flex-wrap items-center gap-3 md:flex">
         <QuantityStepper
           value={qty}
@@ -121,7 +141,15 @@ export function ProductVariantPicker({
             <p className="truncate text-sm font-medium text-foreground">
               {formatMoney(selected.price, currency as Currency)}
             </p>
-            {!inStock && <p className="text-xs text-muted-foreground">{t.outOfStock}</p>}
+            {stockLabel ? (
+              <p
+                className={`text-xs ${
+                  !inStock ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'
+                }`}
+              >
+                {stockLabel}
+              </p>
+            ) : null}
           </div>
           {inStock ? (
             <Button

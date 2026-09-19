@@ -828,6 +828,8 @@ export type StoreContactDto = {
   instagram?: string | null;
   phone?: string | null;
   email?: string | null;
+  /** When variant stock is ≤ this value (and > 0), storefront shows “limited stock”. */
+  lowStockThreshold?: number;
 };
 
 /** Public active coupon for the storefront promo bar. */

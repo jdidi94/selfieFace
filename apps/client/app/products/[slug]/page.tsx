@@ -2,7 +2,7 @@ import { fetchApi, mediaUrl } from '@/lib/api';
 import { getMessages } from '@/lib/messages';
 import { localizedAbsoluteUrl, seoAlternates, seoImages } from '@/lib/seo';
 import { getStorefrontWindow } from '@/lib/storefront-window';
-import { ProductKind, type ProductDetail } from '@lumea/types';
+import { ProductKind, type ProductDetail, type StoreContactDto } from '@lumea/types';
 import { ProductBadge, ProductImage, Rating } from '@lumea/ui';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -77,6 +77,18 @@ export default async function ProductPage({ params }: { params: Params }) {
   }
 
   if (!product) notFound();
+
+  let lowStockThreshold = 5;
+  try {
+    const contact = await fetchApi<StoreContactDto>(
+      `/store/contact?currency=${encodeURIComponent(currency)}`,
+    );
+    if (typeof contact.lowStockThreshold === 'number') {
+      lowStockThreshold = contact.lowStockThreshold;
+    }
+  } catch {
+    // API may be unavailable during local setup
+  }
 
   const images = product.images.map((img) => ({
     ...img,
@@ -187,6 +199,7 @@ export default async function ProductPage({ params }: { params: Params }) {
               variants={product.variants}
               currency={product.currency}
               initialVariantId={defaultVariant?.id}
+              lowStockThreshold={lowStockThreshold}
             />
           </div>
 

@@ -57,6 +57,17 @@ function setMarketLocaleCookies(
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Static brand chrome and other public files must not get market/locale prefixes.
+  if (
+    pathname.startsWith('/brand/') ||
+    pathname === '/favicon.ico' ||
+    pathname === '/robots.txt' ||
+    pathname === '/sitemap.xml' ||
+    /\.(?:png|jpe?g|gif|svg|webp|ico|txt|xml|webmanifest|json|map)$/i.test(pathname)
+  ) {
+    return NextResponse.next();
+  }
+
   // Preserve legacy `?hl=` landings by redirecting into market+locale paths.
   const hl = request.nextUrl.searchParams.get('hl');
   if (hl && isLocale(hl)) {
@@ -93,7 +104,7 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|uploads).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|uploads|brand/).*)',
   ],
 };
 

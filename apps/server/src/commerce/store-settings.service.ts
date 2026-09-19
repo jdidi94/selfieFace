@@ -78,6 +78,7 @@ export class StoreSettingsService {
       facebook: s.contactFacebook,
       instagram: s.contactInstagram,
       email: s.contactEmail,
+      lowStockThreshold: s.lowStockThreshold,
     };
   }
 
