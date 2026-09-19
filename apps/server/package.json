@@ -6,6 +6,7 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main.js",
+    "preinstall": "node -e \"const u=process.env.npm_config_user_agent||'';if(!u.includes('pnpm')){console.error('\\nThis package uses pnpm workspace:*. On Render set:\\n  Root Directory: .\\n  Build: bash scripts/render-build-api.sh\\n  Start: bash scripts/render-start-api.sh\\n');process.exit(1)}\"",
     "lint": "echo \"no lint yet\"",
     "prisma:generate": "prisma generate && node ../../scripts/sync-prisma-clients.mjs",
     "prisma:migrate": "prisma migrate dev",

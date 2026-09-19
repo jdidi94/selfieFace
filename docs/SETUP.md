@@ -394,25 +394,27 @@ API_URL=https://your-api.example/api SITE_URL=https://your-shop.example node scr
 - [ ] CDN: put a CDN in front of `/api/media/*` and static Next assets (Cache-Control already set for media); set `NEXT_PUBLIC_MEDIA_URL` when using a separate media origin
 - [ ] Optional: build API with `apps/server/Dockerfile`
 
-### API Docker (optional)
-
-```bash
-docker build -f apps/server/Dockerfile -t lumea-api .
-docker run --env-file apps/server/.env -p 4000:4000 lumea-api
-```
-
-### Render (API web service)
+### Render (API web service — native Node, no Docker)
 
 This monorepo is **pnpm-only**. `npm install && npm run build` fails (`workspace:*` / broken postinstall).
 
 1. Root Directory: repository root (`.`), not `apps/server`
 2. Build Command: `bash scripts/render-build-api.sh`
-3. Pre-Deploy: `pnpm --filter @lumea/server exec prisma migrate deploy`
-4. Start Command: `pnpm --filter @lumea/server start`
+3. Pre-Deploy: `bash scripts/render-migrate-api.sh`
+4. Start Command: `bash scripts/render-start-api.sh`
 5. Health Check Path: `/api/health/live`
 6. Env: `NODE_VERSION=22`, `NODE_ENV=production`, `TRUST_PROXY=1`, plus `DATABASE_URL` (prefer Render **internal** DB URL; external needs `?sslmode=require`), `JWT_SECRET`, `CLIENT_URL`, `ADMIN_URL`, etc.
 
+**Important:** Changing only `render.yaml` does not update an existing Render service. Paste the commands into **Settings → Build & Deploy**.
+
 Or connect the repo with the Blueprint in [`render.yaml`](../render.yaml).
+
+### API Docker (optional — not required for Render)
+
+```bash
+docker build -f apps/server/Dockerfile -t lumea-api .
+docker run --env-file apps/server/.env -p 4000:4000 lumea-api
+```
 
 No new Prisma migration for Phase 12 (caching / errors / SEO are application-level).
 

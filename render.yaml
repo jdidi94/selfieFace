@@ -1,8 +1,9 @@
-# Render Blueprint — Selfieface API
-# Docs: https://render.com/docs/blueprint-spec
+# Render Blueprint — Selfieface API (native Node, no Docker)
+# Existing services do NOT auto-pick this up — paste the commands into the Dashboard.
 #
-# Do NOT use `npm install && npm run build` — this monorepo uses pnpm
-# workspace:* packages and will fail with EUNSUPPORTEDPROTOCOL / postinstall errors.
+# If Build Command is still `npm install` / `npm run build`, deploy fails with:
+#   npm error code EUNSUPPORTEDPROTOCOL
+#   Unsupported URL Type "workspace:": workspace:*
 
 services:
   - type: web
@@ -12,8 +13,8 @@ services:
     plan: starter
     rootDir: .
     buildCommand: bash scripts/render-build-api.sh
-    preDeployCommand: pnpm --filter @lumea/server exec prisma migrate deploy
-    startCommand: pnpm --filter @lumea/server start
+    preDeployCommand: bash scripts/render-migrate-api.sh
+    startCommand: bash scripts/render-start-api.sh
     healthCheckPath: /api/health/live
     envVars:
       - key: NODE_VERSION
@@ -22,8 +23,6 @@ services:
         value: production
       - key: TRUST_PROXY
         value: "1"
-      # Prefer Render Postgres *internal* URL when the API is also on Render.
-      # External URLs need ?sslmode=require
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
