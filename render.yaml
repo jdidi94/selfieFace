@@ -1,0 +1,38 @@
+# Render Blueprint — Selfieface API
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Do NOT use `npm install && npm run build` — this monorepo uses pnpm
+# workspace:* packages and will fail with EUNSUPPORTEDPROTOCOL / postinstall errors.
+
+services:
+  - type: web
+    name: selfieface-api
+    runtime: node
+    region: frankfurt
+    plan: starter
+    rootDir: .
+    buildCommand: bash scripts/render-build-api.sh
+    preDeployCommand: pnpm --filter @lumea/server exec prisma migrate deploy
+    startCommand: pnpm --filter @lumea/server start
+    healthCheckPath: /api/health/live
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY
+        value: "1"
+      # Prefer Render Postgres *internal* URL when the API is also on Render.
+      # External URLs need ?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CLIENT_URL
+        sync: false
+      - key: ADMIN_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: REVALIDATE_SECRET
+        sync: false

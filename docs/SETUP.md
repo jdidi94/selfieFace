@@ -401,6 +401,19 @@ docker build -f apps/server/Dockerfile -t lumea-api .
 docker run --env-file apps/server/.env -p 4000:4000 lumea-api
 ```
 
+### Render (API web service)
+
+This monorepo is **pnpm-only**. `npm install && npm run build` fails (`workspace:*` / broken postinstall).
+
+1. Root Directory: repository root (`.`), not `apps/server`
+2. Build Command: `bash scripts/render-build-api.sh`
+3. Pre-Deploy: `pnpm --filter @lumea/server exec prisma migrate deploy`
+4. Start Command: `pnpm --filter @lumea/server start`
+5. Health Check Path: `/api/health/live`
+6. Env: `NODE_VERSION=22`, `NODE_ENV=production`, `TRUST_PROXY=1`, plus `DATABASE_URL` (prefer Render **internal** DB URL; external needs `?sslmode=require`), `JWT_SECRET`, `CLIENT_URL`, `ADMIN_URL`, etc.
+
+Or connect the repo with the Blueprint in [`render.yaml`](../render.yaml).
+
 No new Prisma migration for Phase 12 (caching / errors / SEO are application-level).
 
 ## Useful scripts
