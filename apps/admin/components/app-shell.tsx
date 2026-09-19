@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
 const navSections = [
   {
@@ -96,10 +96,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const { market, setMarket, markets } = useAdminMarket();
   const router = useRouter();
-
-  useEffect(() => {
-    router.refresh();
-  }, [market, router]);
 
   return (
     <div className="flex min-h-screen">
@@ -189,7 +185,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
           </div>
         </header>
-        {/* Remount page tree on market change so all lists/forms refetch for the new window. */}
+        {/* Remount page tree on market change so lists/forms refetch for the new window. */}
         <main key={market} className="flex-1 bg-background p-6">
           {children}
         </main>

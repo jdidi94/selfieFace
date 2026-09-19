@@ -37,7 +37,7 @@ import {
   TabsList,
   TabsTrigger,
 } from '@lumea/ui';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 
 type BannerForm = {
@@ -124,16 +124,23 @@ export default function BannersPage() {
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!accessToken) return;
-    const data = await adminFetch<PromoBannerDto[]>('/admin/banners', accessToken);
-    setItems(data);
-    setLoading(false);
-  }
+    setLoading(true);
+    try {
+      const data = await adminFetch<PromoBannerDto[]>('/admin/banners', accessToken, {
+        skipCache: true,
+      });
+      setItems(data);
+    } finally {
+      setLoading(false);
+    }
+  }, [accessToken]);
 
   useEffect(() => {
-    if (!authLoading && accessToken) void load();
-  }, [accessToken, authLoading]);
+    if (authLoading || !accessToken) return;
+    void load();
+  }, [authLoading, accessToken, load]);
 
   function openCreate() {
     setEditId(null);
