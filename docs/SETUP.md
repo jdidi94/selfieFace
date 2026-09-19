@@ -407,6 +407,14 @@ This monorepo is **pnpm-only**. `npm install && npm run build` fails (`workspace
 
 **Important:** Changing only `render.yaml` does not update an existing Render service. Paste the commands into **Settings → Build & Deploy**.
 
+For **client** / **admin** on Render (or any host), set:
+
+- `NEXT_PUBLIC_API_URL=https://<your-api-host>/api`
+- `NEST_API_URL=https://<your-api-host>/api` (server-side login BFF; required or login returns empty/JSON errors)
+- `CLIENT_URL` / `ADMIN_URL` / `CORS_ORIGINS` on the API to match your HTTPS storefront URLs
+
+Chrome “Dangerous” / “Not secure” on login usually means the site is **HTTP** (password forms) or Safe Browsing flagged the host — serve the apps over **HTTPS** (Render does this by default on `*.onrender.com`).
+
 Or connect the repo with the Blueprint in [`render.yaml`](../render.yaml).
 
 ### API Docker (optional — not required for Render)

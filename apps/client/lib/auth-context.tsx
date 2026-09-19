@@ -60,12 +60,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      if (!res.ok) {
-        const err = (await res.json()) as { message?: string };
-        throw new Error(err.message ?? 'Login failed');
+      const data = (await res.json().catch(() => ({}))) as {
+        accessToken?: string;
+        user?: AuthUser;
+        message?: string;
+      };
+      if (!res.ok || !data.accessToken || !data.user) {
+        throw new Error(data.message ?? 'Login failed');
       }
-      const data = (await res.json()) as { accessToken: string; user: AuthUser };
-      applySession(data);
+      applySession({ accessToken: data.accessToken, user: data.user });
     },
     [applySession],
   );
@@ -82,12 +85,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
       });
-      if (!res.ok) {
-        const err = (await res.json()) as { message?: string };
-        throw new Error(err.message ?? 'Registration failed');
+      const data = (await res.json().catch(() => ({}))) as {
+        accessToken?: string;
+        user?: AuthUser;
+        message?: string;
+      };
+      if (!res.ok || !data.accessToken || !data.user) {
+        throw new Error(data.message ?? 'Registration failed');
       }
-      const data = (await res.json()) as { accessToken: string; user: AuthUser };
-      applySession(data);
+      applySession({ accessToken: data.accessToken, user: data.user });
     },
     [applySession],
   );

@@ -1,5 +1,5 @@
 import { clearAuthCookies, REFRESH_COOKIE, setAuthCookies } from '@/lib/auth-cookies';
-import { nestFetch } from '@/lib/nest-api';
+import { nestFetch, nestJson } from '@/lib/nest-api';
 import { UserType, type AuthSession } from '@lumea/types';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -17,7 +17,7 @@ export async function POST() {
     body: JSON.stringify({ refreshToken }),
   });
 
-  const data = (await res.json()) as AuthSession | { message?: string };
+  const data = await nestJson<AuthSession>(res);
   if (!res.ok) {
     const response = NextResponse.json(data, { status: res.status });
     clearAuthCookies(response);
@@ -25,6 +25,15 @@ export async function POST() {
   }
 
   const session = data as AuthSession;
+  if (!session.accessToken || !session.user) {
+    const response = NextResponse.json(
+      { message: (data as { message?: string }).message ?? 'Session refresh failed' },
+      { status: 502 },
+    );
+    clearAuthCookies(response);
+    return response;
+  }
+
   if (session.user.type !== UserType.ADMIN) {
     const response = NextResponse.json({ message: 'Admin access only' }, { status: 403 });
     clearAuthCookies(response);

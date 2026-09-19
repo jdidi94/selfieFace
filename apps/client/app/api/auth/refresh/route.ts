@@ -1,5 +1,5 @@
 import { clearRefreshCookie, REFRESH_COOKIE, setRefreshCookie } from '@/lib/auth-cookies';
-import { nestFetch } from '@/lib/nest-api';
+import { nestFetch, nestJson } from '@/lib/nest-api';
 import type { AuthSession } from '@lumea/types';
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -17,7 +17,7 @@ export async function POST() {
     body: JSON.stringify({ refreshToken }),
   });
 
-  const data = (await res.json()) as AuthSession | { message?: string };
+  const data = await nestJson<AuthSession>(res);
   if (!res.ok) {
     const response = NextResponse.json(data, { status: res.status });
     clearRefreshCookie(response);
@@ -25,6 +25,15 @@ export async function POST() {
   }
 
   const session = data as AuthSession;
+  if (!session.accessToken || !session.user) {
+    const response = NextResponse.json(
+      { message: (data as { message?: string }).message ?? 'Session refresh failed' },
+      { status: 502 },
+    );
+    clearRefreshCookie(response);
+    return response;
+  }
+
   const response = NextResponse.json({
     accessToken: session.accessToken,
     user: session.user,
