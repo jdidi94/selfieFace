@@ -52,14 +52,12 @@ export function marketLabel(code: MarketCode) {
 
 export function MarketProvider({ children }: { children: ReactNode }) {
   const { accessToken, loading: authLoading } = useAuth();
-  const [market, setMarketState] = useState<MarketCode>(MarketCode.OTHER);
+  // Read cookie synchronously so AppShell key={market} does not remount after paint.
+  const [market, setMarketState] = useState<MarketCode>(
+    () => readCookie() ?? MarketCode.OTHER,
+  );
   const [markets, setMarkets] = useState<MarketDto[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fromCookie = readCookie();
-    if (fromCookie) setMarketState(fromCookie);
-  }, []);
 
   useEffect(() => {
     if (authLoading || !accessToken) return;

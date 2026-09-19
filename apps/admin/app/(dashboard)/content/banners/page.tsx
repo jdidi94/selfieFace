@@ -1,7 +1,7 @@
 'use client';
 
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
-import { adminFetch } from '@/lib/api';
+import { adminFetch, mediaUrl, publicApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { submitErrorState, validateWithSchema } from '@/lib/validate-form';
 import { promoBannerUpsertSchema } from '@lumea/validation';
@@ -37,7 +37,8 @@ import {
   TabsList,
   TabsTrigger,
 } from '@lumea/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { Upload } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
 type BannerForm = {
@@ -121,17 +122,21 @@ export default function BannersPage() {
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const loadedOnce = useRef(false);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
-    setLoading(true);
+    if (!loadedOnce.current) setLoading(true);
     try {
       const data = await adminFetch<PromoBannerDto[]>('/admin/banners', accessToken, {
         skipCache: true,
       });
       setItems(data);
+      loadedOnce.current = true;
     } finally {
       setLoading(false);
     }
@@ -145,13 +150,51 @@ export default function BannersPage() {
   function openCreate() {
     setEditId(null);
     setForm(emptyForm());
+    setImagePreview(null);
+    setError(null);
+    setFieldErrors({});
     setOpen(true);
   }
 
   function openEdit(b: PromoBannerDto) {
     setEditId(b.id);
     setForm(formFromBanner(b));
+    setImagePreview(b.imageUrl ? mediaUrl(b.imageUrl) : null);
+    setError(null);
+    setFieldErrors({});
     setOpen(true);
+  }
+
+  async function uploadImage(file: File) {
+    if (!accessToken) {
+      setError('You must be signed in to upload');
+      return;
+    }
+    setUploading(true);
+    setError(null);
+    try {
+      if (file.size > 5 * 1024 * 1024) throw new Error('Image exceeds 5 MB');
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`${publicApiUrl}/admin/media`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      const media = (await res.json()) as { id: string; url: string };
+      setForm((f) => ({ ...f, imageMediaId: media.id }));
+      setImagePreview(mediaUrl(media.url) ?? media.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function clearImage() {
+    setForm((f) => ({ ...f, imageMediaId: '' }));
+    setImagePreview(null);
   }
 
   async function save() {
@@ -236,12 +279,22 @@ export default function BannersPage() {
         </Table>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) {
+            setImagePreview(null);
+            setError(null);
+            setFieldErrors({});
+          }
+        }}
+      >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editId ? 'Edit banner' : 'New banner'}</DialogTitle>
             <p className="text-sm text-muted-foreground">
-              Upload media via admin API (≤5 MB), paste the media id below. Link examples:{' '}
+              Upload a hero image (≤5 MB) or paste a media id. Link examples:{' '}
               <code className="text-xs">/shop</code>, <code className="text-xs">/shop?promotion=1</code>.{' '}
               <Link href="/help#media" className="underline underline-offset-2">
                 Full guide
@@ -294,10 +347,46 @@ export default function BannersPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Image media ID (optional)</Label>
+              <Label>Banner image</Label>
+              <div className="flex flex-wrap items-center gap-3">
+                <Label
+                  htmlFor="banner-image-upload"
+                  className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-border bg-surface px-3 py-2 text-sm hover:bg-surface-muted"
+                >
+                  <Upload className="h-4 w-4" />
+                  {uploading ? 'Uploading…' : 'Upload from computer'}
+                </Label>
+                <Input
+                  id="banner-image-upload"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  disabled={uploading}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadImage(file);
+                    e.target.value = '';
+                  }}
+                />
+                {form.imageMediaId || imagePreview ? (
+                  <Button type="button" variant="outline" size="sm" onClick={clearImage}>
+                    Remove
+                  </Button>
+                ) : null}
+              </div>
+              {imagePreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={imagePreview}
+                  alt=""
+                  className="mt-2 aspect-[16/9] w-full max-w-md rounded-md border border-border object-cover"
+                />
+              ) : null}
               <Input
                 value={form.imageMediaId}
                 onChange={(e) => setForm((f) => ({ ...f, imageMediaId: e.target.value }))}
+                placeholder="Or paste media id"
+                className="font-mono text-xs"
               />
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
@@ -372,7 +461,7 @@ export default function BannersPage() {
 
             <FieldError fieldErrors={fieldErrors} field="translations" />
             <FormErrorBanner message={error} />
-            <Button className="w-full" onClick={() => void save()}>
+            <Button className="w-full" disabled={uploading} onClick={() => void save()}>
               Save banner
             </Button>
           </div>

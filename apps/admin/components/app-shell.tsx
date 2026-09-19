@@ -98,9 +98,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="hidden w-64 shrink-0 border-r border-border bg-surface md:flex md:flex-col">
-        <div className="border-b border-border px-5 py-5">
+    <div className="flex min-h-dvh">
+      <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-hidden border-r border-border bg-surface md:flex">
+        <div className="shrink-0 border-b border-border px-5 py-5">
           <AdminBrandMark />
           <Badge variant="secondary" className="mt-2">
             Admin
@@ -136,7 +136,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Select>
           </div>
         </div>
-        <nav className="flex-1 overflow-y-auto p-3">
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3">
           {navSections.map((section) => (
             <div key={section.label} className="mb-4">
               <p className="px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -162,8 +162,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           ))}
         </nav>
       </aside>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 items-center justify-between border-b border-border bg-surface px-6">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-6">
           <p className="text-sm font-medium text-foreground">
             Dashboard · {marketLabel(market)}
           </p>
