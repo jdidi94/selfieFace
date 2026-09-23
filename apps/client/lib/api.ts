@@ -2,6 +2,17 @@ import { parseApiErrorBody, ApiRequestError, resolveMediaUrl } from '@lumea/util
 
 export const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
+/** Abort hung API calls after 40 seconds. */
+export const API_TIMEOUT_MS = 40_000;
+
+function withApiTimeout(signal?: AbortSignal | null): AbortSignal {
+  const timeout = AbortSignal.timeout(API_TIMEOUT_MS);
+  if (!signal) return timeout;
+  return typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([signal, timeout])
+    : timeout;
+}
+
 /** Public media origin (CDN). Falls back unset → serve via API host. */
 export const mediaBaseUrl =
   process.env.NEXT_PUBLIC_MEDIA_URL?.trim() ||
@@ -53,6 +64,7 @@ function cacheOptions(path: string): RequestInit['next'] {
 export async function fetchApi<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${apiUrl}${path}`, {
     ...init,
+    signal: withApiTimeout(init?.signal),
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers ?? {}),
@@ -73,6 +85,7 @@ export async function authFetch<T>(
 ): Promise<T> {
   const res = await fetch(`${apiUrl}${path}`, {
     ...init,
+    signal: withApiTimeout(init?.signal),
     headers: {
       'Content-Type': 'application/json',
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),

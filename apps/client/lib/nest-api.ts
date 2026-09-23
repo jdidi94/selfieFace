@@ -9,19 +9,36 @@ export const nestApiUrl = (
   'http://localhost:4000/api'
 ).replace(/\/$/, '');
 
+/** Abort hung Nest proxy calls after 40 seconds. */
+export const API_TIMEOUT_MS = 40_000;
+
+function withApiTimeout(signal?: AbortSignal | null): AbortSignal {
+  const timeout = AbortSignal.timeout(API_TIMEOUT_MS);
+  if (!signal) return timeout;
+  return typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([signal, timeout])
+    : timeout;
+}
+
 export async function nestFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = `${nestApiUrl}${path.startsWith('/') ? path : `/${path}`}`;
   try {
     return await fetch(url, {
       ...init,
+      signal: withApiTimeout(init?.signal),
       headers: {
         'Content-Type': 'application/json',
         ...(init?.headers ?? {}),
       },
     });
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Failed to reach the API';
+    const timedOut =
+      err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+    const message = timedOut
+      ? `API timed out after ${API_TIMEOUT_MS / 1000}s`
+      : err instanceof Error
+        ? err.message
+        : 'Failed to reach the API';
     return new Response(JSON.stringify({ message: `API unreachable (${nestApiUrl}): ${message}` }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' },

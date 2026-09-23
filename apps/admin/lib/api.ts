@@ -16,6 +16,17 @@ export const apiUrl = publicApiUrl;
 /** @deprecated Use publicApiUrl — NEST_API_URL is server-only and is undefined in the browser. */
 export const nestApiUrl = publicApiUrl;
 
+/** Abort hung API calls after 40 seconds. */
+export const API_TIMEOUT_MS = 40_000;
+
+function withApiTimeout(signal?: AbortSignal | null): AbortSignal {
+  const timeout = AbortSignal.timeout(API_TIMEOUT_MS);
+  if (!signal) return timeout;
+  return typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([signal, timeout])
+    : timeout;
+}
+
 /** Public media origin (CDN). Falls back unset → serve via API host. */
 export const mediaBaseUrl =
   process.env.NEXT_PUBLIC_MEDIA_URL?.trim() ||
@@ -103,6 +114,7 @@ export async function adminFetch<T>(
 
   const res = await fetch(`${publicApiUrl}${path}`, {
     ...fetchInit,
+    signal: withApiTimeout(fetchInit.signal),
     headers: {
       ...(fetchInit.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
