@@ -1,5 +1,9 @@
 'use client';
 
+import {
+  ConfirmTypedDialog,
+  typedConfirmToken,
+} from '@/components/confirm-typed-dialog';
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
 import { adminFetch, mediaUrl, publicApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -126,6 +130,7 @@ export default function BannersPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [pendingDelete, setPendingDelete] = useState<PromoBannerDto | null>(null);
   const loadedOnce = useRef(false);
 
   const load = useCallback(async () => {
@@ -269,7 +274,11 @@ export default function BannersPage() {
                   <Button variant="outline" size="sm" onClick={() => openEdit(item)}>
                     Edit
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={() => void remove(item.id)}>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setPendingDelete(item)}
+                  >
                     Delete
                   </Button>
                 </TableCell>
@@ -278,6 +287,25 @@ export default function BannersPage() {
           </TableBody>
         </Table>
       </div>
+
+      <ConfirmTypedDialog
+        open={!!pendingDelete}
+        title="Delete banner"
+        description={
+          pendingDelete
+            ? `This permanently deletes the banner “${pendingDelete.title}”.`
+            : ''
+        }
+        confirmLabel={typedConfirmToken(pendingDelete?.title, 'DELETE')}
+        confirmValue={typedConfirmToken(pendingDelete?.title, 'DELETE')}
+        confirmButtonLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          await remove(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
 
       <Dialog
         open={open}

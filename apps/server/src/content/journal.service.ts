@@ -7,10 +7,12 @@ import { JournalArticleStatus, Locale, Prisma, ProductStatus } from '@prisma/cli
 import {
   Currency as SharedCurrency,
   Locale as SharedLocale,
+  type AdminJournalListResponse,
   type MarketCode,
   type ProductListItem,
 } from '@lumea/types';
 import {
+  adminJournalListQuerySchema,
   journalArticleUpsertSchema,
   journalListQuerySchema,
   localeSchema,
@@ -184,17 +186,35 @@ export class JournalService {
     return this.toDetail(row, lang, false, currencyCode);
   }
 
-  async listAdmin(marketCode: MarketCode | string = 'OTHER') {
+  async listAdmin(
+    marketCode: MarketCode | string = 'OTHER',
+    query: unknown = {},
+  ): Promise<AdminJournalListResponse> {
+    const parsed = adminJournalListQuerySchema.safeParse(query);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+
     const marketRow = await this.marketsService.getByCode(marketCode);
     const currency = currencyForMarket(marketCode) as SharedCurrency;
-    const rows = await this.prisma.journalArticle.findMany({
-      where: { marketId: marketRow.id },
-      include: articleInclude,
-      orderBy: [{ updatedAt: 'desc' }],
-    });
-    return Promise.all(
+    const where = { marketId: marketRow.id };
+    const [total, rows] = await Promise.all([
+      this.prisma.journalArticle.count({ where }),
+      this.prisma.journalArticle.findMany({
+        where,
+        include: articleInclude,
+        orderBy: [{ updatedAt: 'desc' }],
+        skip: (parsed.data.page - 1) * parsed.data.pageSize,
+        take: parsed.data.pageSize,
+      }),
+    ]);
+    const items = await Promise.all(
       rows.map((row) => this.toDetail(row, SharedLocale.EN, true, currency)),
     );
+    return {
+      items,
+      total,
+      page: parsed.data.page,
+      pageSize: parsed.data.pageSize,
+    };
   }
 
   async getAdmin(id: string) {

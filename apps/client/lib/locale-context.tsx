@@ -3,6 +3,13 @@
 import { Locale } from '@lumea/types';
 import { isRtlLocale } from '@lumea/utils';
 import {
+  LOCALE_COOKIE,
+  LOCALE_COOKIE_LEGACY,
+  PREFERENCE_COOKIE_MAX_AGE,
+  readCookieMigrating,
+  writeCookieMigrating,
+} from '@/lib/storefront-cookies';
+import {
   createContext,
   useCallback,
   useContext,
@@ -11,8 +18,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-
-const COOKIE = 'lumea_locale';
 
 type LocaleContextValue = {
   locale: Locale;
@@ -23,9 +28,7 @@ type LocaleContextValue = {
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 
 function readCookie(): Locale | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp(`${COOKIE}=([^;]+)`));
-  const value = match?.[1];
+  const value = readCookieMigrating(LOCALE_COOKIE, LOCALE_COOKIE_LEGACY, PREFERENCE_COOKIE_MAX_AGE);
   if (value === Locale.EN) return Locale.EN;
   if (value === Locale.AR) return Locale.AR;
   if (value === Locale.FR) return Locale.FR;
@@ -33,7 +36,7 @@ function readCookie(): Locale | null {
 }
 
 function writeCookie(locale: Locale) {
-  document.cookie = `${COOKIE}=${locale};path=/;max-age=${60 * 60 * 24 * 365};samesite=lax`;
+  writeCookieMigrating(LOCALE_COOKIE, LOCALE_COOKIE_LEGACY, locale, PREFERENCE_COOKIE_MAX_AGE);
 }
 
 function applyDocumentLocale(locale: Locale) {

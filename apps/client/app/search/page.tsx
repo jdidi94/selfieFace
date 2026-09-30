@@ -86,8 +86,8 @@ export default function SearchPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="price">Price</SelectItem>
+              <SelectItem value="name">{t.sortName}</SelectItem>
+              <SelectItem value="price">{t.sortPrice}</SelectItem>
             </SelectContent>
           </Select>
           <Select value={order} onValueChange={(v) => setOrder(v as 'asc' | 'desc')}>
@@ -95,8 +95,8 @@ export default function SearchPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="asc">Asc</SelectItem>
-              <SelectItem value="desc">Desc</SelectItem>
+              <SelectItem value="asc">{t.sortAsc}</SelectItem>
+              <SelectItem value="desc">{t.sortDesc}</SelectItem>
             </SelectContent>
           </Select>
           <Link href="/shop" className="text-sm text-muted-foreground underline-offset-2 hover:underline">

@@ -7,11 +7,31 @@ type ProductJsonLdProps = {
 };
 
 export function ProductJsonLd({ product, url, imageUrl }: ProductJsonLdProps) {
-  const variant = product.variants.find((v) => v.isActive) ?? product.variants[0];
-  const price = variant ? (variant.price / 100).toFixed(2) : undefined;
-  const availability = product.variants.some((v) => v.isActive && v.stock > 0)
+  const variant =
+    product.variants.find((v) => v.isActive && v.stock > 0) ??
+    product.variants.find((v) => v.isActive) ??
+    product.variants[0];
+  const price =
+    variant && typeof variant.price === 'number'
+      ? (variant.price / 100).toFixed(2)
+      : undefined;
+  const priceCurrency = variant?.currency ?? product.currency;
+  const inStock = product.variants.some((v) => v.isActive && v.stock > 0);
+  const availability = inStock
     ? 'https://schema.org/InStock'
     : 'https://schema.org/OutOfStock';
+
+  const offers =
+    price && priceCurrency
+      ? {
+          '@type': 'Offer' as const,
+          url,
+          priceCurrency,
+          price,
+          availability,
+          itemCondition: 'https://schema.org/NewCondition',
+        }
+      : undefined;
 
   const data = {
     '@context': 'https://schema.org',
@@ -23,15 +43,7 @@ export function ProductJsonLd({ product, url, imageUrl }: ProductJsonLdProps) {
     brand: product.brand?.name
       ? { '@type': 'Brand', name: product.brand.name }
       : undefined,
-    offers: price
-      ? {
-          '@type': 'Offer',
-          url,
-          priceCurrency: product.currency,
-          price,
-          availability,
-        }
-      : undefined,
+    offers,
     ...(product.reviewCount && product.averageRating
       ? {
           aggregateRating: {

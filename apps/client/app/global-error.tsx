@@ -7,7 +7,9 @@ import { Locale } from '@lumea/types';
 
 function readLocale(): Locale {
   if (typeof document === 'undefined') return Locale.EN;
-  const match = document.cookie.match(/(?:^|; )lumea_locale=([^;]+)/);
+  const match =
+    document.cookie.match(/(?:^|; )selfieface_locale=([^;]+)/) ??
+    document.cookie.match(/(?:^|; )lumea_locale=([^;]+)/);
   const value = match?.[1] ? decodeURIComponent(match[1]) : '';
   if (value === Locale.AR) return Locale.AR;
   if (value === Locale.FR) return Locale.FR;

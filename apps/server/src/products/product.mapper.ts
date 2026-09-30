@@ -57,6 +57,7 @@ type PackComponentWithVariant = PackComponent & {
 
 type ProductWithRelations = Product & {
   category: CategoryWithTranslations;
+  problemCategories?: CategoryWithTranslations[];
   brand: BrandWithTranslations;
   market?: Pick<Market, 'code'> | null;
   variants: VariantWithPrices[];
@@ -117,6 +118,8 @@ export function mapCategory(
     name: t?.name ?? c.name,
     slug: c.slug,
     description: t?.description ?? c.description,
+    kind: c.kind,
+    parentCategoryId: c.parentCategoryId,
     locale,
     translations,
   };
@@ -359,6 +362,7 @@ export function mapProductListItem(
       : undefined,
     shortDescription: t?.shortDescription ?? p.shortDescription,
     category: mapCategory(p.category, locale),
+    problemCategories: p.problemCategories?.map((category) => mapCategory(category, locale)),
     brand: mapBrand(p.brand, locale),
     priceFrom,
     compareAtFrom,
@@ -417,7 +421,13 @@ export function mapProductDetail(
     benefits: t?.benefits ?? p.benefits,
     howToUse: t?.howToUse ?? p.howToUse,
     suitableFor: t?.suitableFor ?? p.suitableFor,
+    competitorPriceAmount: p.competitorPriceAmount,
+    competitorPriceSource: p.competitorPriceSource,
+    competitorPriceCheckedAt: p.competitorPriceCheckedAt?.toISOString() ?? null,
     category: mapCategory(p.category, locale, includeAllTranslations),
+    problemCategories: (p.problemCategories ?? []).map((category) =>
+      mapCategory(category, locale, includeAllTranslations),
+    ),
     brand: mapBrand(p.brand, locale, includeAllTranslations),
     currency,
     locale,

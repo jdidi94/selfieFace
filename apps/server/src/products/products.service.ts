@@ -8,6 +8,7 @@ import {
   Currency as SharedCurrency,
   Locale as SharedLocale,
   MarketCode,
+  type CatalogCopyResult,
   type ProductDetail,
   type ProductListItem,
   type ProductListResponse,
@@ -20,6 +21,11 @@ import {
   productPriceRangeQuerySchema,
   productUpdateSchema,
 } from '@lumea/validation';
+import {
+  amountForCurrency,
+  resolveCopyTarget,
+  skuForMarket,
+} from '../catalog/catalog-copy.util';
 import {
   CACHE_PREFIX,
   CatalogCacheService,
@@ -62,6 +68,7 @@ function ritualPartnerTags(tags: string[]): string[] {
 
 const productInclude = {
   category: { include: { translations: true } },
+  problemCategories: { include: { translations: true } },
   brand: { include: { translations: true } },
   market: true,
   variants: { include: { prices: true } },
@@ -129,6 +136,7 @@ export class ProductsService {
     const {
       q,
       category,
+      problemCategory,
       brand,
       kind,
       currency,
@@ -176,7 +184,22 @@ export class ProductsService {
         },
       ];
     }
-    if (category) where.category = { slug: category, marketId: marketRow.id };
+    if (category) {
+      const matchedCategory = await this.prisma.category.findUnique({
+        where: { marketId_slug: { marketId: marketRow.id, slug: category } },
+        select: { id: true, kind: true },
+      });
+      if (matchedCategory?.kind === 'PROBLEM') {
+        where.problemCategories = { some: { id: matchedCategory.id } };
+      } else {
+        where.category = { slug: category, marketId: marketRow.id };
+      }
+    }
+    if (problemCategory) {
+      where.problemCategories = {
+        some: { slug: problemCategory, marketId: marketRow.id },
+      };
+    }
     if (brand) where.brand = { slug: brand, marketId: marketRow.id };
     if (incoming) where.isIncoming = true;
     if (recommended) where.popularityScore = { gt: 0 };
@@ -550,6 +573,7 @@ export class ProductsService {
     const resolvedMarket = parseMarketCode(data.marketCode ?? marketCode);
     const marketRow = await this.marketsService.getByCode(resolvedMarket);
     await this.assertCatalogRefsInMarket(data.categoryId, data.brandId, marketRow.id);
+    await this.assertProblemCategories(data.problemCategoryIds ?? [], data.categoryId, marketRow.id);
     const product = await this.prisma.product.create({
       data: {
         name: copy.name,
@@ -561,7 +585,13 @@ export class ProductsService {
         benefits: copy.benefits,
         howToUse: copy.howToUse,
         suitableFor: copy.suitableFor,
+        competitorPriceAmount: data.competitorPriceAmount ?? null,
+        competitorPriceSource: data.competitorPriceSource ?? null,
+        competitorPriceCheckedAt: data.competitorPriceCheckedAt ?? null,
         categoryId: data.categoryId,
+        problemCategories: data.problemCategoryIds?.length
+          ? { connect: data.problemCategoryIds.map((id) => ({ id })) }
+          : undefined,
         brandId: data.brandId,
         marketId: marketRow.id,
         isIncoming: data.isIncoming ?? false,
@@ -681,6 +711,13 @@ export class ProductsService {
       data.brandId ?? existing.brandId,
       existing.marketId,
     );
+    if (data.problemCategoryIds !== undefined) {
+      await this.assertProblemCategories(
+        data.problemCategoryIds,
+        data.categoryId ?? existing.categoryId,
+        existing.marketId,
+      );
+    }
 
     await this.prisma.$transaction(async (tx) => {
       let copy:
@@ -719,7 +756,25 @@ export class ProductsService {
                 suitableFor: copy.suitableFor,
               }
             : {}),
+          ...(data.competitorPriceAmount !== undefined
+            ? { competitorPriceAmount: data.competitorPriceAmount }
+            : {}),
+          ...(data.competitorPriceSource !== undefined
+            ? { competitorPriceSource: data.competitorPriceSource }
+            : {}),
+          ...(data.competitorPriceCheckedAt !== undefined
+            ? { competitorPriceCheckedAt: data.competitorPriceCheckedAt }
+            : {}),
           ...(data.categoryId != null ? { categoryId: data.categoryId } : {}),
+          ...(data.problemCategoryIds !== undefined
+            ? {
+                problemCategories: {
+                  set: data.problemCategoryIds.map((problemId) => ({ id: problemId })),
+                },
+              }
+            : data.categoryId != null
+              ? { problemCategories: { set: [] } }
+              : {}),
           ...(data.brandId != null ? { brandId: data.brandId } : {}),
           ...(data.kind != null ? { kind: data.kind as ProductKind } : {}),
           ...(data.isIncoming != null ? { isIncoming: data.isIncoming } : {}),
@@ -891,13 +946,311 @@ export class ProductsService {
     return { updated: items.length, items };
   }
 
+  async copyToMarket(id: string, input: unknown): Promise<CatalogCopyResult> {
+    const existing = await this.prisma.product.findUnique({
+      where: { id },
+      include: {
+        market: true,
+        brand: { include: { translations: true } },
+        category: { include: { translations: true } },
+        translations: true,
+        images: true,
+        variants: { include: { prices: true } },
+        packComponents: {
+          include: {
+            variant: {
+              include: {
+                product: { select: { id: true, slug: true, name: true } },
+              },
+            },
+          },
+          orderBy: { sortOrder: 'asc' },
+        },
+      },
+    });
+    if (!existing) throw new NotFoundException('Product not found');
+
+    const { target, sourceCode, targetCode } = await resolveCopyTarget(
+      this.marketsService,
+      input,
+      existing.market.code,
+    );
+
+    const clash = await this.prisma.product.findUnique({
+      where: { marketId_slug: { marketId: target.id, slug: existing.slug } },
+    });
+    if (clash) {
+      throw new BadRequestException(
+        `Product slug "${existing.slug}" already exists in ${targetCode}`,
+      );
+    }
+
+    const warnings: string[] = [];
+
+    const brandId = await this.ensureBrandInMarket(
+      existing.brand,
+      target.id,
+      targetCode,
+      warnings,
+    );
+    const categoryId = await this.ensureCategoryInMarket(
+      existing.category,
+      target.id,
+      targetCode,
+      warnings,
+    );
+
+    let created;
+    try {
+      created = await this.prisma.product.create({
+        data: {
+          name: existing.name,
+          slug: existing.slug,
+          status: existing.status,
+          kind: existing.kind,
+          shortDescription: existing.shortDescription,
+          description: existing.description,
+          benefits: existing.benefits,
+          howToUse: existing.howToUse,
+          suitableFor: existing.suitableFor,
+          categoryId,
+          brandId,
+          marketId: target.id,
+          popularityScore: existing.popularityScore,
+          isIncoming: existing.isIncoming,
+          incomingAt: existing.incomingAt,
+          tags: existing.tags,
+          translations: {
+            create: existing.translations.map((t) => ({
+              locale: t.locale,
+              name: t.name,
+              shortDescription: t.shortDescription,
+              description: t.description,
+              benefits: t.benefits,
+              howToUse: t.howToUse,
+              suitableFor: t.suitableFor,
+            })),
+          },
+          images: {
+            create: existing.images.map((img) => ({
+              mediaId: img.mediaId,
+              sortOrder: img.sortOrder,
+              alt: img.alt,
+            })),
+          },
+          variants: {
+            create: existing.variants.map((v) => {
+              const money = amountForCurrency(v.prices, target.currency);
+              return {
+                name: v.name,
+                sku: skuForMarket(v.sku, target.code),
+                stock: v.stock,
+                weightGrams: v.weightGrams,
+                barcode: v.barcode,
+                isActive: v.isActive,
+                prices: {
+                  create: [
+                    {
+                      currency: target.currency,
+                      amount: money.amount,
+                      compareAtAmount: money.compareAtAmount,
+                    },
+                  ],
+                },
+              };
+            }),
+          },
+        },
+        include: { variants: true },
+      });
+    } catch (err) {
+      if (
+        typeof err === 'object' &&
+        err != null &&
+        'code' in err &&
+        (err as { code?: string }).code === 'P2002'
+      ) {
+        throw new BadRequestException(
+          `Could not copy product: slug or SKU already exists in ${targetCode}`,
+        );
+      }
+      throw err;
+    }
+
+    for (const sv of existing.variants) {
+      const tv = created.variants.find((v) => v.name === sv.name);
+      if (!tv) continue;
+      try {
+        await setVariantStockOnDefaultWarehouse(this.prisma, tv.id, sv.stock);
+      } catch (err) {
+        warnings.push(
+          `Stock not set for SKU ${tv.sku}: ${
+            err instanceof Error ? err.message : 'no default warehouse'
+          }`,
+        );
+      }
+    }
+
+    if (existing.kind === ProductKind.PACK && existing.packComponents.length) {
+      let linked = 0;
+      for (const comp of existing.packComponents) {
+        const mapped = await this.findPackComponentVariantInMarket(
+          comp.variant,
+          target.id,
+          target.code,
+        );
+        if (!mapped) {
+          warnings.push(
+            `Pack component "${comp.variant.product.name}" / ${comp.variant.name} not found in ${targetCode} — skipped. Copy that product first, then re-edit this pack.`,
+          );
+          continue;
+        }
+        await this.prisma.packComponent.create({
+          data: {
+            packProductId: created.id,
+            variantId: mapped,
+            quantity: comp.quantity,
+            sortOrder: comp.sortOrder,
+          },
+        });
+        linked += 1;
+      }
+      if (linked === 0 && existing.packComponents.length > 0) {
+        warnings.push(
+          'Pack was copied without any components. Copy component products into the target market, then edit the pack.',
+        );
+      }
+      await this.syncPackVariantStock(created.id);
+    }
+
+    await this.catalogCache.invalidateCatalog(targetCode);
+    return {
+      id: created.id,
+      type: 'product',
+      sourceMarket: sourceCode,
+      targetMarket: targetCode,
+      warnings,
+    };
+  }
+
+  private async ensureBrandInMarket(
+    brand: {
+      id: string;
+      name: string;
+      slug: string;
+      description: string | null;
+      imageUrl: string | null;
+      translations: { locale: Locale; name: string; description: string | null }[];
+    },
+    targetMarketId: string,
+    targetCode: MarketCode,
+    warnings: string[],
+  ): Promise<string> {
+    const existing = await this.prisma.brand.findUnique({
+      where: { marketId_slug: { marketId: targetMarketId, slug: brand.slug } },
+    });
+    if (existing) return existing.id;
+
+    const created = await this.prisma.brand.create({
+      data: {
+        name: brand.name,
+        slug: brand.slug,
+        description: brand.description,
+        imageUrl: brand.imageUrl,
+        marketId: targetMarketId,
+        translations: {
+          create: brand.translations.map((t) => ({
+            locale: t.locale,
+            name: t.name,
+            description: t.description,
+          })),
+        },
+      },
+    });
+    warnings.push(`Created brand "${brand.name}" in ${targetCode}`);
+    return created.id;
+  }
+
+  private async ensureCategoryInMarket(
+    category: {
+      id: string;
+      name: string;
+      slug: string;
+      description: string | null;
+      sortOrder: number;
+      translations: { locale: Locale; name: string; description: string | null }[];
+    },
+    targetMarketId: string,
+    targetCode: MarketCode,
+    warnings: string[],
+  ): Promise<string> {
+    const existing = await this.prisma.category.findUnique({
+      where: { marketId_slug: { marketId: targetMarketId, slug: category.slug } },
+    });
+    if (existing) return existing.id;
+
+    const created = await this.prisma.category.create({
+      data: {
+        name: category.name,
+        slug: category.slug,
+        description: category.description,
+        sortOrder: category.sortOrder,
+        marketId: targetMarketId,
+        translations: {
+          create: category.translations.map((t) => ({
+            locale: t.locale,
+            name: t.name,
+            description: t.description,
+          })),
+        },
+      },
+    });
+    warnings.push(`Created category "${category.name}" in ${targetCode}`);
+    return created.id;
+  }
+
+  /**
+   * Resolve a pack component variant in the target market by product slug +
+   * variant name, then by market-suffixed SKU.
+   */
+  private async findPackComponentVariantInMarket(
+    sourceVariant: {
+      id: string;
+      name: string;
+      sku: string;
+      product: { id: string; slug: string; name: string };
+    },
+    targetMarketId: string,
+    targetCode: string,
+  ): Promise<string | null> {
+    const bySlug = await this.prisma.productVariant.findFirst({
+      where: {
+        name: sourceVariant.name,
+        product: {
+          marketId: targetMarketId,
+          slug: sourceVariant.product.slug,
+        },
+      },
+      select: { id: true },
+    });
+    if (bySlug) return bySlug.id;
+
+    const targetSku = skuForMarket(sourceVariant.sku, targetCode);
+    const bySku = await this.prisma.productVariant.findUnique({
+      where: { sku: targetSku },
+      select: { id: true, product: { select: { marketId: true } } },
+    });
+    if (bySku && bySku.product.marketId === targetMarketId) return bySku.id;
+    return null;
+  }
+
   private async assertCatalogRefsInMarket(
     categoryId: string,
     brandId: string,
     marketId: string,
   ) {
     const [category, brand] = await Promise.all([
-      this.prisma.category.findUnique({ where: { id: categoryId }, select: { marketId: true } }),
+      this.prisma.category.findUnique({ where: { id: categoryId }, select: { marketId: true, kind: true } }),
       this.prisma.brand.findUnique({ where: { id: brandId }, select: { marketId: true } }),
     ]);
     if (!category) throw new BadRequestException('Category not found');
@@ -905,8 +1258,42 @@ export class ProductsService {
     if (category.marketId !== marketId) {
       throw new BadRequestException('Category is not in this market');
     }
+    if (category.kind !== 'CATEGORY') {
+      throw new BadRequestException('Choose a main category, not a problem subcategory');
+    }
     if (brand.marketId !== marketId) {
       throw new BadRequestException('Brand is not in this market');
+    }
+  }
+
+  private async assertProblemCategories(
+    ids: string[],
+    parentCategoryId: string,
+    marketId: string,
+  ) {
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length !== ids.length) {
+      throw new BadRequestException('Problem subcategories must be unique');
+    }
+    if (!uniqueIds.length) return;
+    const rows = await this.prisma.category.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true, marketId: true, kind: true, parentCategoryId: true },
+    });
+    if (rows.length !== uniqueIds.length) {
+      throw new BadRequestException('One or more problem subcategories do not exist');
+    }
+    if (
+      rows.some(
+        (row) =>
+          row.marketId !== marketId ||
+          row.kind !== 'PROBLEM' ||
+          row.parentCategoryId !== parentCategoryId,
+      )
+    ) {
+      throw new BadRequestException(
+        'Problem subcategories must belong to the selected main category and market',
+      );
     }
   }
 }

@@ -10,20 +10,28 @@ import {
   parseMarketLocalePath,
   withMarketLocale,
 } from '@/lib/market-path';
-
-const LOCALE_COOKIE = 'lumea_locale';
-const CURRENCY_COOKIE = 'lumea_currency';
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+import {
+  CURRENCY_COOKIE,
+  CURRENCY_COOKIE_LEGACY,
+  LOCALE_COOKIE,
+  LOCALE_COOKIE_LEGACY,
+  PREFERENCE_COOKIE_MAX_AGE,
+} from '@/lib/storefront-cookies';
 
 function defaultLocale(request: NextRequest): Locale {
-  const fromCookie = request.cookies.get(LOCALE_COOKIE)?.value;
+  const fromCookie =
+    request.cookies.get(LOCALE_COOKIE)?.value ??
+    request.cookies.get(LOCALE_COOKIE_LEGACY)?.value;
   if (isLocale(fromCookie)) return fromCookie;
   return Locale.EN;
 }
 
 function defaultMarket(request: NextRequest): MarketCode {
-  if (request.cookies.get(CURRENCY_COOKIE)?.value) {
-    return marketFromCurrency(currencyFromCookie(request.cookies.get(CURRENCY_COOKIE)?.value));
+  const currencyValue =
+    request.cookies.get(CURRENCY_COOKIE)?.value ??
+    request.cookies.get(CURRENCY_COOKIE_LEGACY)?.value;
+  if (currencyValue) {
+    return marketFromCurrency(currencyFromCookie(currencyValue));
   }
   const geoCountry =
     (request as NextRequest & { geo?: { country?: string } }).geo?.country ??
@@ -39,19 +47,22 @@ function setMarketLocaleCookies(
 ) {
   response.cookies.set(LOCALE_COOKIE, locale, {
     path: '/',
-    maxAge: COOKIE_MAX_AGE,
+    maxAge: PREFERENCE_COOKIE_MAX_AGE,
     sameSite: 'lax',
   });
   response.cookies.set(CURRENCY_COOKIE, currencyFromMarket(market), {
     path: '/',
-    maxAge: COOKIE_MAX_AGE,
+    maxAge: PREFERENCE_COOKIE_MAX_AGE,
     sameSite: 'lax',
   });
+  // Drop legacy names once migrated.
+  response.cookies.set(LOCALE_COOKIE_LEGACY, '', { path: '/', maxAge: 0 });
+  response.cookies.set(CURRENCY_COOKIE_LEGACY, '', { path: '/', maxAge: 0 });
 }
 
 /**
  * Market + locale path prefixes: `/ae/en/shop`, `/tn/ar/products/x`, `/other/fr`.
- * Rewrites to the unprefixed App Router path and syncs `lumea_currency` + `lumea_locale`.
+ * Rewrites to the unprefixed App Router path and syncs `selfieface_currency` + `selfieface_locale`.
  * Bare or locale-only paths redirect into `/{market}/{locale}/...`.
  */
 export function middleware(request: NextRequest) {
@@ -63,7 +74,10 @@ export function middleware(request: NextRequest) {
     pathname === '/favicon.ico' ||
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||
-    /\.(?:png|jpe?g|gif|svg|webp|ico|txt|xml|webmanifest|json|map)$/i.test(pathname)
+    pathname === '/sw.js' ||
+    pathname === '/offline.html' ||
+    pathname.startsWith('/feeds/') ||
+    /\.(?:png|jpe?g|gif|svg|webp|ico|txt|xml|webmanifest|json|map|js)$/i.test(pathname)
   ) {
     return NextResponse.next();
   }
@@ -104,7 +118,7 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|uploads|brand/).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|sw\\.js|offline\\.html|feeds|uploads|brand/).*)',
   ],
 };
 

@@ -122,6 +122,7 @@ export class WishlistService {
         translations: { locale: string; name: string }[];
         images: { media: { url: string } }[];
         variants: {
+          id: string;
           isActive: boolean;
           stock: number;
           prices: { currency: Currency; amount: number; compareAtAmount: number | null }[];
@@ -133,6 +134,8 @@ export class WishlistService {
     const translation =
       item.product.translations.find((t) => t.locale === 'en') ?? item.product.translations[0];
     const activeVariants = item.product.variants.filter((v) => v.isActive);
+    const inStockVariant = activeVariants.find((v) => v.stock > 0);
+    const defaultVariantId = inStockVariant?.id ?? activeVariants[0]?.id ?? null;
     const amounts = activeVariants
       .map((v) => {
         const price =
@@ -164,6 +167,7 @@ export class WishlistService {
             ? SharedCurrency.AED
             : SharedCurrency.USD,
       inStock,
+      defaultVariantId,
       createdAt: item.createdAt.toISOString(),
     };
   }

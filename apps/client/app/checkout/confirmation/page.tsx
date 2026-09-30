@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useCart } from '@/lib/cart-context';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
+import { formatOrderMoney } from '@/lib/order-money';
 import {
   clearPendingPayment,
   getStripePublishableKey,
@@ -15,7 +16,6 @@ import {
   storeGuestOrderToken,
 } from '@/lib/stripe';
 import type { OrderDto } from '@lumea/types';
-import { formatMoney } from '@lumea/utils';
 import { Button, LoadingState } from '@lumea/ui';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -44,9 +44,7 @@ function ConfirmationInner() {
   const [resumeSecret, setResumeSecret] = useState<string | null>(null);
   const [guestAccessToken, setGuestAccessToken] = useState<string | null>(null);
   const [finalizing, setFinalizing] = useState(false);
-  const [tokenCopied, setTokenCopied] = useState(false);
-  const [numberCopied, setNumberCopied] = useState(false);
-  const [bothCopied, setBothCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     if (authLoading || !orderId) return;
@@ -219,67 +217,24 @@ function ConfirmationInner() {
     order.paymentStatus === 'AUTHORIZED' && !order.clientSecret;
   const guestToken = guestAccessToken ?? order.guestAccessToken;
   const orderNumber = order.number;
-  const trackHref =
-    guestToken != null
-      ? withMarketLocale(
-          market,
-          locale,
-          `/orders/track?number=${encodeURIComponent(orderNumber)}&token=${encodeURIComponent(guestToken)}`,
-        )
-      : withMarketLocale(market, locale, '/orders/track');
+  const trackHref = guestToken
+    ? withMarketLocale(
+        market,
+        locale,
+        `/orders/track?number=${encodeURIComponent(orderNumber)}&token=${encodeURIComponent(guestToken)}`,
+      )
+    : withMarketLocale(market, locale, '/orders/track');
+  const trackAbsoluteUrl =
+    typeof window !== 'undefined' ? `${window.location.origin}${trackHref}` : trackHref;
 
-  async function copyText(value: string, which: 'number' | 'token' | 'both') {
+  async function copyTrackLink() {
     try {
-      await navigator.clipboard.writeText(value);
-      if (which === 'number') {
-        setNumberCopied(true);
-        window.setTimeout(() => setNumberCopied(false), 2000);
-      } else if (which === 'token') {
-        setTokenCopied(true);
-        window.setTimeout(() => setTokenCopied(false), 2000);
-      } else {
-        setBothCopied(true);
-        window.setTimeout(() => setBothCopied(false), 2000);
-      }
+      await navigator.clipboard.writeText(trackAbsoluteUrl);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
     } catch {
       // ignore
     }
-  }
-
-  async function copyGuestToken() {
-    if (!guestToken) return;
-    await copyText(guestToken, 'token');
-  }
-
-  async function copyOrderNumber() {
-    await copyText(orderNumber, 'number');
-  }
-
-  async function copyBoth() {
-    if (!guestToken) return;
-    await copyText(
-      `${t.trackOrderNumber}: ${orderNumber}\n${t.trackOrderToken}: ${guestToken}`,
-      'both',
-    );
-  }
-
-  function downloadTrackingDetails() {
-    if (!guestToken) return;
-    const body = [
-      'Selfieface order tracking',
-      '',
-      `${t.trackOrderNumber}: ${orderNumber}`,
-      `${t.trackOrderToken}: ${guestToken}`,
-      '',
-      `Track URL: ${typeof window !== 'undefined' ? window.location.origin : ''}${trackHref}`,
-    ].join('\n');
-    const blob = new Blob([body], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `selfieface-order-${orderNumber}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   return (
@@ -300,7 +255,7 @@ function ConfirmationInner() {
       {isCod && (
         <p className="mt-4 rounded-lg border border-border bg-surface p-4 text-sm text-muted-foreground">
           {t.paymentMethodCod} <span className="text-foreground">{t.paymentCod}</span>.{' '}
-          {t.haveReady(formatMoney(order.total, order.currency))}
+          {t.haveReady(formatOrderMoney(order.total, order.currency, locale))}
         </p>
       )}
 
@@ -308,35 +263,18 @@ function ConfirmationInner() {
         <div className="mt-6 space-y-3 rounded-lg border border-border bg-surface p-4 text-sm">
           <p className="font-medium text-foreground">{t.guestTrackingTitle}</p>
           <p className="text-muted-foreground">{t.guestTrackingBody}</p>
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground">{t.trackOrderNumber}</span>
-              <code className="max-w-full truncate rounded bg-surface-muted px-2 py-1 font-mono text-xs">
-                {order.number}
-              </code>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copyOrderNumber()}>
-                {numberCopied ? t.trackingDetailsCopied : t.copyOrderNumber}
-              </Button>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs text-muted-foreground">{t.trackOrderToken}</span>
-              <code className="max-w-full truncate rounded bg-surface-muted px-2 py-1 font-mono text-xs">
-                {guestToken}
-              </code>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copyGuestToken()}>
-                {tokenCopied ? t.trackingDetailsCopied : t.copyAccessToken}
-              </Button>
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground">{t.trackOrderNumber}</span>
+            <code className="max-w-full truncate rounded bg-surface-muted px-2 py-1 font-mono text-xs">
+              {order.number}
+            </code>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => void copyBoth()}>
-              {bothCopied ? t.trackingDetailsCopied : t.copyTrackingBoth}
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={downloadTrackingDetails}>
-              {t.downloadTrackingDetails}
+            <Button type="button" size="sm" variant="outline" onClick={() => void copyTrackLink()}>
+              {linkCopied ? t.trackLinkCopied : t.copyTrackLink}
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link href={trackHref}>{t.trackOrderCta}</Link>
+              <Link href={trackHref}>{t.openTrackLink}</Link>
             </Button>
           </div>
         </div>
@@ -371,12 +309,12 @@ function ConfirmationInner() {
             <span>
               {item.productName} ({item.variantName}) × {item.quantity}
             </span>
-            <span>{formatMoney(item.lineTotal, order.currency)}</span>
+            <span>{formatOrderMoney(item.lineTotal, order.currency, locale)}</span>
           </div>
         ))}
         <div className="flex justify-between border-t border-border pt-3 font-medium">
           <span>{t.total}</span>
-          <span>{formatMoney(order.total, order.currency)}</span>
+          <span>{formatOrderMoney(order.total, order.currency, locale)}</span>
         </div>
       </div>
       <div className="mt-8 flex flex-wrap gap-3">
@@ -385,7 +323,7 @@ function ConfirmationInner() {
         </Button>
         {!accessToken && guestToken ? (
           <Button variant="outline" asChild>
-            <Link href={trackHref}>{t.trackOrderCta}</Link>
+            <Link href={trackHref}>{t.openTrackLink}</Link>
           </Button>
         ) : null}
         {accessToken ? (

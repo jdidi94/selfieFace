@@ -400,6 +400,8 @@ async function main() {
     {
       name: 'Barrier Repair Serum',
       slug: 'barrier-repair-serum',
+      competitorPriceUsd: 5600,
+      competitorPriceSource: 'Comparable retailers',
       categoryId: skincare.id,
       translations: [
         {
@@ -437,6 +439,8 @@ async function main() {
     {
       name: 'Daily Mineral SPF 30',
       slug: 'daily-mineral-spf-30',
+      competitorPriceUsd: 4200,
+      competitorPriceSource: 'Comparable retailers',
       categoryId: skincare.id,
       translations: [
         {
@@ -487,6 +491,9 @@ async function main() {
           benefits: en.benefits,
           howToUse: en.howToUse,
           suitableFor: en.suitableFor,
+          competitorPriceAmount: p.competitorPriceUsd ?? null,
+          competitorPriceSource: p.competitorPriceSource ?? null,
+          competitorPriceCheckedAt: p.competitorPriceUsd ? new Date() : null,
         },
       });
       for (const t of p.translations) {
@@ -527,6 +534,9 @@ async function main() {
         benefits: en.benefits,
         howToUse: en.howToUse,
         suitableFor: en.suitableFor,
+        competitorPriceAmount: p.competitorPriceUsd ?? null,
+        competitorPriceSource: p.competitorPriceSource ?? null,
+        competitorPriceCheckedAt: p.competitorPriceUsd ? new Date() : null,
         categoryId: p.categoryId,
         brandId: brand.id,
         marketId: otherMarket.id,

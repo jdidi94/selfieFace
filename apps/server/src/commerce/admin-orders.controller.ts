@@ -33,6 +33,12 @@ export class AdminOrdersController {
     return this.ordersService.updateStatusAdmin(id, body);
   }
 
+  @Patch('orders/:id/lock')
+  @Permissions('orders.update')
+  setLock(@Param('id') id: string, @Body() body: unknown) {
+    return this.ordersService.setLockAdmin(id, body);
+  }
+
   @Post('orders/:id/cancel')
   @Permissions('orders.update')
   cancel(@Param('id') id: string, @Body() body: unknown) {

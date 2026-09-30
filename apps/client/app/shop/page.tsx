@@ -34,6 +34,7 @@ function parseFilters(params: Record<string, string | string[] | undefined>): Sh
   return {
     q: first(params.q) ?? '',
     category: first(params.category) ?? '',
+    problemCategory: first(params.problemCategory) ?? '',
     brand: first(params.brand) ?? '',
     kind: kindRaw === 'PRODUCT' || kindRaw === 'PACK' ? kindRaw : '',
     minPrice: first(params.minPrice) ?? '',
@@ -117,6 +118,16 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
   }
 
   const totalPages = Math.max(1, Math.ceil(products.total / products.pageSize));
+  const selectedCategory = categories.find(
+    (category) => category.kind !== 'PROBLEM' && category.slug === filters.category,
+  );
+  const relatedProblems = selectedCategory
+    ? categories.filter(
+        (category) =>
+          category.kind === 'PROBLEM' && category.parentCategoryId === selectedCategory.id,
+      )
+    : [];
+  const selectedCategorySlug = selectedCategory?.slug ?? '';
   const pageQuery = (p: number) => {
     const qs = shopFilterQuery(filters, p);
     return `/shop?${qs.toString()}`;
@@ -146,25 +157,49 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
       </div>
 
       {categories.length > 0 ? (
-        <nav className="mb-8 flex flex-wrap gap-3 text-sm" aria-label={t.category}>
-          {categories.map((c) => (
-            <Link
-              key={c.id}
-              href={`/shop?category=${encodeURIComponent(c.slug)}`}
-              className={`underline-offset-4 hover:text-foreground hover:underline ${
-                filters.category === c.slug ? 'text-foreground underline' : 'text-muted-foreground'
-              }`}
-            >
-              {c.name}
-            </Link>
-          ))}
-        </nav>
+        <div className="mb-8 space-y-3">
+          <nav className="flex flex-wrap gap-3 text-sm" aria-label={t.category}>
+            {categories.filter((category) => category.kind !== 'PROBLEM').map((c) => (
+              <Link
+                key={c.id}
+                href={`/shop?category=${encodeURIComponent(c.slug)}`}
+                className={`rounded-full border px-3 py-1.5 transition-colors ${
+                  filters.category === c.slug
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border text-muted-foreground hover:border-foreground hover:text-foreground'
+                }`}
+              >
+                {c.name}
+              </Link>
+            ))}
+          </nav>
+          {relatedProblems.length > 0 ? (
+            <nav className="flex flex-wrap items-center gap-2" aria-label={t.shopByConcern}>
+              <span className="me-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                {t.shopByConcern}
+              </span>
+              {relatedProblems.map((problem) => (
+                <Link
+                  key={problem.id}
+                  href={`/shop?category=${encodeURIComponent(selectedCategorySlug)}&problemCategory=${encodeURIComponent(problem.slug)}`}
+                  className={`rounded-full border px-3 py-1 text-sm transition-colors ${
+                    filters.problemCategory === problem.slug
+                      ? 'border-accent bg-accent text-accent-foreground'
+                      : 'border-border bg-surface text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {problem.name}
+                </Link>
+              ))}
+            </nav>
+          ) : null}
+        </div>
       ) : null}
 
       <div className="flex flex-col gap-8 lg:flex-row">
         <ShopFilterPanel
           values={filters}
-          categories={categories}
+          categories={categories.filter((category) => category.kind !== 'PROBLEM')}
           brands={brands}
           priceBounds={priceBounds}
           currency={currency}

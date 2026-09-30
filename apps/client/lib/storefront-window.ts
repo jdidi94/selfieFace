@@ -6,6 +6,12 @@ import {
 } from '@lumea/types';
 import { cookies } from 'next/headers';
 import { currencyFromCookie, marketFromCurrency } from '@/lib/market-path';
+import {
+  CURRENCY_COOKIE,
+  CURRENCY_COOKIE_LEGACY,
+  LOCALE_COOKIE,
+  LOCALE_COOKIE_LEGACY,
+} from '@/lib/storefront-cookies';
 
 export function parseLocaleCookie(value?: string): Locale {
   if (value === Locale.AR) return Locale.AR;
@@ -24,8 +30,12 @@ export async function getStorefrontWindow(): Promise<{
   market: MarketCode;
 }> {
   const cookieStore = await cookies();
-  const locale = parseLocaleCookie(cookieStore.get('lumea_locale')?.value);
-  const currency = parseCurrencyCookie(cookieStore.get('lumea_currency')?.value);
+  const locale = parseLocaleCookie(
+    cookieStore.get(LOCALE_COOKIE)?.value ?? cookieStore.get(LOCALE_COOKIE_LEGACY)?.value,
+  );
+  const currency = parseCurrencyCookie(
+    cookieStore.get(CURRENCY_COOKIE)?.value ?? cookieStore.get(CURRENCY_COOKIE_LEGACY)?.value,
+  );
   const market = marketFromCurrency(currency);
   return { locale, currency, market };
 }

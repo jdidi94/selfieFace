@@ -1,6 +1,7 @@
 export type ShopFilterValues = {
   q: string;
   category: string;
+  problemCategory: string;
   brand: string;
   /** PRODUCT | PACK — empty = all */
   kind: string;
@@ -19,6 +20,7 @@ export function shopFilterQuery(values: ShopFilterValues, page?: number) {
   const params = new URLSearchParams();
   if (values.q) params.set('q', values.q);
   if (values.category) params.set('category', values.category);
+  if (values.problemCategory) params.set('problemCategory', values.problemCategory);
   if (values.brand) params.set('brand', values.brand);
   if (values.kind === 'PRODUCT' || values.kind === 'PACK') params.set('kind', values.kind);
   if (values.minPrice) params.set('minPrice', values.minPrice);

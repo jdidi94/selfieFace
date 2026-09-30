@@ -4,6 +4,7 @@ import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import {
   Badge,
+  Button,
   Input,
   LoadingState,
   Select,
@@ -39,6 +40,22 @@ function statusVariant(status: OrderStatus): 'default' | 'secondary' | 'outline'
   return 'outline';
 }
 
+const statusStyles: Record<OrderStatus, string> = {
+  PENDING: 'border-amber-300 bg-amber-50 text-amber-900',
+  PROCESSING: 'border-sky-300 bg-sky-50 text-sky-900',
+  SHIPPED: 'border-violet-300 bg-violet-50 text-violet-900',
+  DELIVERED: 'border-emerald-300 bg-emerald-50 text-emerald-900',
+  CANCELLED: 'border-slate-300 bg-slate-100 text-slate-700',
+};
+
+const statusRowStyles: Record<OrderStatus, string> = {
+  PENDING: 'bg-amber-50/30',
+  PROCESSING: 'bg-sky-50/30',
+  SHIPPED: 'bg-violet-50/30',
+  DELIVERED: 'bg-emerald-50/30',
+  CANCELLED: 'bg-slate-50/50',
+};
+
 export default function OrdersPage() {
   const { accessToken, loading: authLoading } = useAuth();
   const [data, setData] = useState<OrderListResponse | null>(null);
@@ -46,6 +63,9 @@ export default function OrdersPage() {
   const [status, setStatus] = useState('all');
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [bulkPending, setBulkPending] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
@@ -58,12 +78,43 @@ export default function OrdersPage() {
       accessToken,
     );
     setData(result);
+    setSelectedIds([]);
     setLoading(false);
   }, [accessToken, status, search]);
 
   useEffect(() => {
     if (!authLoading && accessToken) void load();
   }, [accessToken, authLoading, load]);
+
+  const pendingIds = (data?.items ?? [])
+    .filter((order) => order.status === 'PENDING')
+    .map((order) => order.id);
+  const selectedPendingIds = selectedIds.filter((id) => pendingIds.includes(id));
+
+  async function startSelectedOrders() {
+    if (!accessToken || selectedPendingIds.length === 0) return;
+    if (!window.confirm(`Move ${selectedPendingIds.length} pending order(s) to processing?`)) return;
+    setBulkPending(true);
+    setActionMessage(null);
+    const results = await Promise.allSettled(
+      selectedPendingIds.map((id) =>
+        adminFetch(`/admin/orders/${id}/status`, accessToken, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'PROCESSING' }),
+        }),
+      ),
+    );
+    const succeeded = results.filter((result) => result.status === 'fulfilled').length;
+    const failed = results.length - succeeded;
+    setSelectedIds([]);
+    setActionMessage(
+      failed
+        ? `${succeeded} updated; ${failed} could not be changed (for example, locked orders).`
+        : `${succeeded} orders moved to processing.`,
+    );
+    setBulkPending(false);
+    await load();
+  }
 
   if (authLoading || loading) return <LoadingState />;
 
@@ -107,10 +158,28 @@ export default function OrdersPage() {
         </button>
       </div>
 
+      {actionMessage ? <p role="status" className="text-sm text-muted-foreground">{actionMessage}</p> : null}
+      {selectedIds.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface-muted/50 p-3">
+          <p className="text-sm">{selectedIds.length} selected · {selectedPendingIds.length} pending can move to processing</p>
+          <Button size="sm" disabled={bulkPending || selectedPendingIds.length === 0} onClick={() => void startSelectedOrders()}>
+            {bulkPending ? 'Updating…' : 'Start processing'}
+          </Button>
+        </div>
+      ) : null}
+
       <div className="rounded-lg border border-border bg-surface">
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  aria-label="Select pending orders on this page"
+                  checked={pendingIds.length > 0 && pendingIds.every((id) => selectedIds.includes(id))}
+                  onChange={(event) => setSelectedIds(event.target.checked ? pendingIds : [])}
+                />
+              </TableHead>
               <TableHead>Order</TableHead>
               <TableHead>Customer</TableHead>
               <TableHead>Status</TableHead>
@@ -121,7 +190,22 @@ export default function OrdersPage() {
           </TableHeader>
           <TableBody>
             {(data?.items ?? []).map((order) => (
-              <TableRow key={order.id}>
+              <TableRow key={order.id} className={statusRowStyles[order.status]}>
+                <TableCell>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select order ${order.number}`}
+                    disabled={order.status !== 'PENDING'}
+                    checked={selectedIds.includes(order.id)}
+                    onChange={(event) =>
+                      setSelectedIds((current) =>
+                        event.target.checked
+                          ? [...current, order.id]
+                          : current.filter((id) => id !== order.id),
+                      )
+                    }
+                  />
+                </TableCell>
                 <TableCell>
                   <Link
                     href={`/orders/${order.id}`}
@@ -132,7 +216,7 @@ export default function OrdersPage() {
                 </TableCell>
                 <TableCell className="text-muted-foreground">{order.customerEmail}</TableCell>
                 <TableCell>
-                  <Badge variant={statusVariant(order.status)}>{order.status}</Badge>
+                  <Badge variant={statusVariant(order.status)} className={statusStyles[order.status]}>{order.status}</Badge>
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">{order.paymentStatus}</TableCell>
                 <TableCell className="text-right">

@@ -24,6 +24,12 @@ export const revalidate = 300;
 type Params = Promise<{ slug: string }>;
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
+export async function generateStaticParams() {
+  const { fetchAllCategorySlugs } = await import('@/lib/static-slugs');
+  const slugs = await fetchAllCategorySlugs();
+  return slugs.map((slug) => ({ slug }));
+}
+
 function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -36,6 +42,7 @@ function parseFilters(
   return {
     q: first(params.q) ?? '',
     category: categorySlug,
+    problemCategory: first(params.problemCategory) ?? '',
     brand: first(params.brand) ?? '',
     kind: kindRaw === 'PRODUCT' || kindRaw === 'PACK' ? kindRaw : '',
     minPrice: first(params.minPrice) ?? '',
@@ -177,11 +184,29 @@ export default async function CategoryShopPage({
           <p className="mt-3 text-muted-foreground">{t.shopSubtitle(currency)}</p>
         )}
       </div>
+      {category.kind !== 'PROBLEM' &&
+      categories.some(
+        (child) => child.kind === 'PROBLEM' && child.parentCategoryId === category.id,
+      ) ? (
+        <nav className="mb-8 flex flex-wrap gap-2" aria-label="Shop by concern">
+          {categories
+            .filter((child) => child.kind === 'PROBLEM' && child.parentCategoryId === category.id)
+            .map((child) => (
+              <Link
+                key={child.id}
+                href={`/shop/category/${child.slug}`}
+                className="rounded-full border border-border px-3 py-2 text-sm text-muted-foreground transition hover:border-foreground hover:text-foreground"
+              >
+                {child.name}
+              </Link>
+            ))}
+        </nav>
+      ) : null}
 
       <div className="flex flex-col gap-8 lg:flex-row">
         <ShopFilterPanel
           values={filters}
-          categories={categories}
+          categories={categories.filter((item) => item.kind !== 'PROBLEM')}
           brands={brands}
           action={`/shop/category/${slug}`}
           lockCategory

@@ -2,8 +2,11 @@ import { StorefrontDrawers } from '@/components/storefront-drawers';
 import { StorefrontFooter } from '@/components/storefront-footer';
 import { StorefrontHeader } from '@/components/storefront-header';
 import { ActiveCouponsBar } from '@/components/active-coupons-bar';
+import { CookieConsentBanner } from '@/components/cookie-consent-banner';
 import { MarketUnavailable } from '@/components/market-unavailable';
+import { OrganizationWebsiteJsonLd } from '@/components/organization-website-json-ld';
 import { PageTransition } from '@/components/page-transition';
+import { PwaRegister } from '@/components/pwa-register';
 import { AuthProvider } from '@/lib/auth-context';
 import { BehaviorCollector } from '@/lib/behavior';
 import { CartProvider } from '@/lib/cart-context';
@@ -12,7 +15,7 @@ import { LocaleProvider } from '@/lib/locale-context';
 import { StorefrontPanelsProvider } from '@/lib/storefront-panels';
 import { ThemeProvider, THEME_INIT_SCRIPT, type Theme } from '@/lib/theme-context';
 import { fetchApi } from '@/lib/api';
-import { siteUrl } from '@/lib/seo';
+import { absoluteUrl, siteUrl } from '@/lib/seo';
 import { getStorefrontWindow } from '@/lib/storefront-window';
 import type { MarketDto, StoreContactDto } from '@lumea/types';
 import { Toaster } from '@lumea/ui';
@@ -50,6 +53,8 @@ export async function generateMetadata(): Promise<Metadata> {
     // API may be unavailable during local setup
   }
 
+  const ogImage = absoluteUrl('/brand/open-graph.png');
+
   return {
     metadataBase: new URL(siteUrl()),
     title: {
@@ -67,16 +72,16 @@ export async function generateMetadata(): Promise<Metadata> {
       type: 'website',
       images: [
         {
-          url: '/brand/open-graph.png',
-          width: 1734,
-          height: 907,
+          url: ogImage,
+          width: 1200,
+          height: 630,
           alt: 'Selfieface',
         },
       ],
     },
     twitter: {
       card: 'summary_large_image',
-      images: ['/brand/open-graph.png'],
+      images: [ogImage],
     },
     ...(marketEnabled
       ? {}
@@ -91,8 +96,10 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = await cookies();
-  const { locale, currency } = await getStorefrontWindow();
-  const theme = parseTheme(cookieStore.get('lumea_theme')?.value);
+  const { locale, currency, market } = await getStorefrontWindow();
+  const theme = parseTheme(
+    cookieStore.get('selfieface_theme')?.value ?? cookieStore.get('lumea_theme')?.value,
+  );
   const dir = isRtlLocale(locale) ? 'rtl' : 'ltr';
 
   let marketEnabled = true;
@@ -126,6 +133,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        {marketEnabled ? (
+          <OrganizationWebsiteJsonLd locale={locale} market={market} />
+        ) : null}
       </head>
       <body
         className={`${display.variable} ${sans.variable} min-h-screen antialiased`}
@@ -144,6 +154,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                       <PageTransition>{children}</PageTransition>
                       <StorefrontFooter contact={storeContact} />
                       <StorefrontDrawers />
+                      <CookieConsentBanner />
+                      <PwaRegister />
                       <Toaster />
                     </StorefrontPanelsProvider>
                   </CartProvider>

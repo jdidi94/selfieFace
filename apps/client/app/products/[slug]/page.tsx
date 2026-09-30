@@ -20,6 +20,13 @@ export const revalidate = 300;
 
 type Params = Promise<{ slug: string }>;
 
+/** Prebuild known product paths; ISR still refreshes every `revalidate` seconds. */
+export async function generateStaticParams() {
+  const { fetchAllProductSlugs } = await import('@/lib/static-slugs');
+  const slugs = await fetchAllProductSlugs();
+  return slugs.map((slug) => ({ slug }));
+}
+
 export async function generateMetadata({ params }: { params: Params }): Promise<Metadata> {
   const { slug } = await params;
   const { locale, currency, market } = await getStorefrontWindow();
@@ -156,7 +163,6 @@ export default async function ProductPage({ params }: { params: Params }) {
             {isPack ? <ProductBadge label={t.labelPack} variant="accent" /> : null}
             <ProductBadge label={product.brand.name} />
             <ProductBadge label={product.category.name} variant="outline" />
-            <ProductBadge label={product.currency} variant="outline" />
             {product.labels?.map((label) => {
               const text =
                 label.kind === 'incoming'
@@ -200,6 +206,8 @@ export default async function ProductPage({ params }: { params: Params }) {
               currency={product.currency}
               initialVariantId={defaultVariant?.id}
               lowStockThreshold={lowStockThreshold}
+              competitorPriceAmount={product.competitorPriceAmount}
+              competitorPriceSource={product.competitorPriceSource}
             />
           </div>
 
@@ -241,7 +249,15 @@ export default async function ProductPage({ params }: { params: Params }) {
         {product.howToUse && (
           <section>
             <h2 className="font-display text-2xl">{t.howToUse}</h2>
-            <p className="mt-3 whitespace-pre-line text-muted-foreground">{product.howToUse}</p>
+            <ol className="mt-3 list-decimal space-y-2 ps-5 text-muted-foreground marker:text-foreground">
+              {product.howToUse
+                .split(/(?:\r?\n|[,،;])+/)
+                .map((step) => step.replace(/^\s*(?:(?:\d+)[.)]|[-*•])\s*/, '').trim())
+                .filter(Boolean)
+                .map((step, index) => (
+                  <li key={`${index}-${step.slice(0, 24)}`}>{step}</li>
+                ))}
+            </ol>
           </section>
         )}
         {product.suitableFor && (

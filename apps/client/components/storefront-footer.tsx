@@ -4,24 +4,51 @@ import { BrandLogo } from '@/components/brand-logo';
 import { LocaleLink } from '@/components/locale-link';
 import { NewsletterSignupForm } from '@/components/newsletter-signup-form';
 import { StorefrontFooterContact } from '@/components/storefront-footer-contact';
+import { fetchApi } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { clearCookieConsent } from '@/lib/cookie-consent';
 import { useCurrency } from '@/lib/currency-context';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
-import type { StoreContactDto } from '@lumea/types';
+import { authPathWithReturn } from '@/lib/auth-return';
+import type { CatalogCategory, StoreContactDto } from '@lumea/types';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 export function StorefrontFooter({ contact }: { contact?: StoreContactDto }) {
   const { user } = useAuth();
   const { locale } = useLocale();
   const { currency } = useCurrency();
   const t = getMessages(locale);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const currentSearch = searchParams.toString();
+  const currentPath = `${pathname}${currentSearch ? `?${currentSearch}` : ''}`;
+  const [categories, setCategories] = useState<CatalogCategory[]>([]);
 
-  const shopLinks = [
-    { href: '/shop', label: t.footerSkincare },
-    { href: '/shop', label: t.footerBodyCare },
-    { href: '/shop', label: t.footerMakeup },
-    { href: '/shop', label: t.footerWellness },
-  ];
+  useEffect(() => {
+    let cancelled = false;
+    void fetchApi<CatalogCategory[]>(
+      `/categories?locale=${locale}&currency=${currency}`,
+    )
+      .then((cats) => {
+        if (!cancelled) setCategories(cats.filter((category) => category.kind !== 'PROBLEM').slice(0, 4));
+      })
+      .catch(() => {
+        if (!cancelled) setCategories([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [locale, currency]);
+
+  const shopLinks =
+    categories.length > 0
+      ? categories.map((c) => ({
+          href: `/shop/category/${c.slug}`,
+          label: c.name,
+        }))
+      : [{ href: '/shop', label: t.footerShop }];
 
   return (
     <footer className="border-t border-border bg-surface-muted/60">
@@ -39,7 +66,7 @@ export function StorefrontFooter({ contact }: { contact?: StoreContactDto }) {
           </p>
           <ul className="mt-4 space-y-2">
             {shopLinks.map((link) => (
-              <li key={link.label}>
+              <li key={`${link.href}-${link.label}`}>
                 <LocaleLink
                   href={link.href}
                   className="text-sm text-foreground/80 hover:text-foreground"
@@ -65,19 +92,47 @@ export function StorefrontFooter({ contact }: { contact?: StoreContactDto }) {
               {t.footerLegal}
             </p>
             <ul className="mt-4 space-y-2 text-sm text-foreground/80">
+              <li>
+                <LocaleLink href="/about">{t.about}</LocaleLink>
+              </li>
+              <li>
+                <LocaleLink href="/help">{t.footerHelp}</LocaleLink>
+              </li>
+              <li>
+                <LocaleLink href="/contact">{t.footerContact}</LocaleLink>
+              </li>
               {!user ? (
                 <li>
-                  <LocaleLink href="/orders/track">{t.footerTrackOrder}</LocaleLink>
+                  <LocaleLink href={authPathWithReturn('/account/login', currentPath)}>{t.signIn}</LocaleLink>
                 </li>
-              ) : null}
+              ) : (
+                <li>
+                  <LocaleLink href="/account/orders">{t.viewOrders}</LocaleLink>
+                </li>
+              )}
               <li>
-                <LocaleLink href="#">{t.footerPrivacy}</LocaleLink>
+                <LocaleLink href="/legal/privacy">{t.footerPrivacy}</LocaleLink>
               </li>
               <li>
-                <LocaleLink href="#">{t.footerTerms}</LocaleLink>
+                <LocaleLink href="/legal/terms">{t.footerTerms}</LocaleLink>
               </li>
               <li>
-                <LocaleLink href="#">{t.footerReturns}</LocaleLink>
+                <LocaleLink href="/legal/cookies">{t.footerCookies}</LocaleLink>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className="text-sm text-foreground/80 hover:text-foreground"
+                  onClick={() => clearCookieConsent()}
+                >
+                  {t.cookieConsentChange}
+                </button>
+              </li>
+              <li>
+                <LocaleLink href="/legal/shipping">{t.footerShipping}</LocaleLink>
+              </li>
+              <li>
+                <LocaleLink href="/legal/returns">{t.footerReturns}</LocaleLink>
               </li>
             </ul>
           </div>

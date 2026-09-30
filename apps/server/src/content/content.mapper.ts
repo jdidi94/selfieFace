@@ -1,5 +1,7 @@
 import type {
   MarketCode,
+  FaqItemDto,
+  FaqItemTranslationDto,
   JournalArticleDetail,
   JournalArticleImageDto,
   JournalArticleListItem,
@@ -11,6 +13,8 @@ import type {
 } from '@lumea/types';
 import { Locale as SharedLocale } from '@lumea/types';
 import type {
+  FaqItem,
+  FaqItemTranslation,
   JournalArticle,
   JournalArticleImage,
   JournalArticleTranslation,
@@ -31,6 +35,11 @@ type ArticleWithRelations = JournalArticle & {
 type BannerWithRelations = PromoBanner & {
   translations: PromoBannerTranslation[];
   imageMedia?: Media | null;
+  market?: { code: string } | null;
+};
+
+type FaqWithRelations = FaqItem & {
+  translations: FaqItemTranslation[];
   market?: { code: string } | null;
 };
 
@@ -147,4 +156,31 @@ export function isBannerScheduleActive(row: PromoBanner, at = new Date()): boole
   if (row.startsAt && row.startsAt > at) return false;
   if (row.endsAt && row.endsAt < at) return false;
   return true;
+}
+
+export function mapFaqItem(
+  row: FaqWithRelations,
+  locale: SharedLocale = SharedLocale.EN,
+  includeAll = false,
+): FaqItemDto {
+  const t = pickTranslation(row.translations, locale);
+  const translations: FaqItemTranslationDto[] | undefined = includeAll
+    ? row.translations.map((tr) => ({
+        locale: tr.locale as Locale,
+        question: tr.question,
+        answer: tr.answer,
+      }))
+    : undefined;
+
+  return {
+    id: row.id,
+    category: row.category,
+    sortOrder: row.sortOrder,
+    published: row.published,
+    question: t?.question ?? '',
+    answer: t?.answer ?? '',
+    locale,
+    marketCode: row.market?.code ? (row.market.code as MarketCode) : undefined,
+    translations,
+  };
 }

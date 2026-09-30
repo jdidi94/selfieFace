@@ -113,6 +113,7 @@ export type Permission =
   | 'orders.read'
   | 'orders.update'
   | 'customers.read'
+  | 'customers.update'
   | 'inventory.read'
   | 'inventory.update'
   | 'content.read'
@@ -122,7 +123,9 @@ export type Permission =
   | 'coupons.read'
   | 'coupons.create'
   | 'coupons.update'
-  | 'coupons.delete';
+  | 'coupons.delete'
+  | 'tickets.read'
+  | 'tickets.update';
 
 export type AuthUser = {
   id: string;
@@ -165,6 +168,8 @@ export type CatalogCategory = {
   name: string;
   slug: string;
   description?: string | null;
+  kind?: 'CATEGORY' | 'PROBLEM';
+  parentCategoryId?: string | null;
   locale?: Locale;
   translations?: CategoryTranslationDto[];
 };
@@ -247,6 +252,7 @@ export type ProductListItem = {
   marketCode?: MarketCode;
   shortDescription?: string | null;
   category: CatalogCategory;
+  problemCategories?: CatalogCategory[];
   brand: CatalogBrand;
   priceFrom: number;
   compareAtFrom?: number | null;
@@ -280,7 +286,12 @@ export type ProductDetail = {
   benefits?: string | null;
   howToUse?: string | null;
   suitableFor?: string | null;
+  /** Optional comparable price from another retailer, in the active market currency. */
+  competitorPriceAmount?: number | null;
+  competitorPriceSource?: string | null;
+  competitorPriceCheckedAt?: string | null;
   category: CatalogCategory;
+  problemCategories?: CatalogCategory[];
   brand: CatalogBrand;
   currency: Currency;
   locale?: Locale;
@@ -334,7 +345,17 @@ export type CustomerProfileDto = {
   phone?: string | null;
   preferredLocale?: Locale | null;
   preferredCurrency?: Currency | null;
+  emailNotificationsEnabled: boolean;
   loyaltyBalance?: number | null;
+};
+
+export type LegalDocumentDto = {
+  id?: string;
+  slug: 'privacy' | 'terms' | 'cookies' | 'shipping' | 'returns';
+  locale: Locale;
+  title: string;
+  content: string;
+  updatedAt?: string;
 };
 
 export type AddressDto = {
@@ -361,6 +382,7 @@ export type AdminCustomerListItemDto = {
   phone?: string | null;
   orderCount: number;
   loyaltyBalance?: number | null;
+  blockedAt?: string | null;
   createdAt: string;
 };
 
@@ -369,6 +391,35 @@ export type AdminCustomerListResponse = {
   total: number;
   page: number;
   pageSize: number;
+};
+
+export type AdminCustomerOrderSummaryDto = {
+  id: string;
+  number: string;
+  status: OrderStatus;
+  total: number;
+  currency: Currency;
+  createdAt: string;
+};
+
+export type AdminCustomerBehaviorEventDto = {
+  id: string;
+  type: BehaviorEventType;
+  productId?: string | null;
+  query?: string | null;
+  path?: string | null;
+  createdAt: string;
+};
+
+export type AdminCustomerDetailDto = CustomerProfileDto & {
+  userId?: string | null;
+  isGuest: boolean;
+  orderCount: number;
+  createdAt: string;
+  loyaltyBalance?: number | null;
+  blockedAt?: string | null;
+  orders: AdminCustomerOrderSummaryDto[];
+  behaviorEvents: AdminCustomerBehaviorEventDto[];
 };
 
 export type AdminReviewListItemDto = {
@@ -551,6 +602,16 @@ export type CouponDto = {
   updatedAt: string;
 };
 
+/** Result of copying a catalog entity into another market window. */
+export type CatalogCopyResult = {
+  id: string;
+  type: 'product' | 'category' | 'brand' | 'coupon';
+  sourceMarket: MarketCode;
+  targetMarket: MarketCode;
+  /** Non-fatal issues (e.g. skipped pack components, cleared product IDs). */
+  warnings: string[];
+};
+
 export type WishlistItemDto = {
   id: string;
   productId: string;
@@ -561,6 +622,8 @@ export type WishlistItemDto = {
   compareAtFrom?: number | null;
   currency: Currency;
   inStock: boolean;
+  /** Preferred variant for “Add to bag” (active in-stock, else first active). */
+  defaultVariantId?: string | null;
   createdAt: string;
 };
 
@@ -707,6 +770,8 @@ export type OrderDto = {
   currency: Currency;
   locale?: Locale;
   marketCode?: MarketCode;
+  /** Checkout / account email when available (guest or registered). */
+  customerEmail?: string | null;
   subtotal: number;
   discount: number;
   shippingAmount: number;
@@ -744,6 +809,30 @@ export type OrderDto = {
   /** Konnect hosted checkout URL (returned once at create). */
   payUrl?: string | null;
   konnectPaymentRef?: string | null;
+  /** When set, status updates are rejected until unlocked. */
+  lockedAt?: string | null;
+  /** Computed refund suggestion from market refund policy (admin). */
+  refundPreview?: OrderRefundPreviewDto | null;
+};
+
+/** Breakdown of a policy-computed admin refund (minor units). */
+export type OrderRefundPreviewDto = {
+  eligible: boolean;
+  reason?: string | null;
+  /** Suggested Stripe refund amount (minor units). */
+  amount: number;
+  currency: Currency;
+  /** true when order is still PENDING/PROCESSING (pre-fulfillment full refund). */
+  preFulfillment: boolean;
+  windowExpiresAt?: string | null;
+  breakdown: {
+    merchandise: number;
+    shipping: number;
+    tax: number;
+    restockingFee: number;
+    /** Merchandise share applied (10000 = 100%). */
+    partialBps: number;
+  };
 };
 
 export type AdminOrderDto = OrderDto & {
@@ -801,7 +890,9 @@ export type StoreSettingsDto = {
   stripePublishableKey?: string | null;
   konnectEnabled: boolean;
   konnectApiKeySet: boolean;
+  /** Always null in API responses; empty on write means keep existing. */
   konnectWalletId?: string | null;
+  konnectWalletIdSet: boolean;
   konnectSandbox: boolean;
   contactWhatsapp?: string | null;
   contactFacebook?: string | null;
@@ -820,6 +911,25 @@ export type StoreSettingsDto = {
   /** Max redeem as % of post-coupon subtotal in basis points. */
   loyaltyMaxRedeemBps?: number | null;
   loyaltySignupBonusPoints: number;
+  /** Days after ship/delivery for return refunds. 0 = no time limit. */
+  refundWindowDays: number;
+  /** When true, window starts from SHIPPED; otherwise DELIVERED. */
+  refundWindowAfterShip: boolean;
+  refundAllowedAfterShipped: boolean;
+  refundAllowedAfterDelivered: boolean;
+  /** Include shipping on return (post-fulfillment) refunds. */
+  refundShippingRefundable: boolean;
+  /** Include tax (proportional) on return refunds. */
+  refundTaxRefundable: boolean;
+  /** Restocking fee bps of refunded merchandise (returns only). */
+  refundRestockingFeeBps: number;
+  /** Default merchandise share to refund in bps; null = 100%. */
+  refundDefaultPartialBps?: number | null;
+  mailingEnabled: boolean;
+  mailLogsEnabled: boolean;
+  customerOrderEmailsEnabled: boolean;
+  adminOrderEmailsEnabled: boolean;
+  adminStockEmailsEnabled: boolean;
 };
 
 export type StoreContactDto = {
@@ -898,6 +1008,13 @@ export type JournalListResponse = {
   page: number;
   pageSize: number;
   locale?: Locale;
+};
+
+export type AdminJournalListResponse = {
+  items: JournalArticleDetail[];
+  total: number;
+  page: number;
+  pageSize: number;
 };
 
 export type PromoBannerTranslationDto = {
@@ -1000,6 +1117,7 @@ export enum MerchandisingRailKind {
 export enum BehaviorEventType {
   SEARCH = 'SEARCH',
   PRODUCT_CLICK = 'PRODUCT_CLICK',
+  PAGE_VIEW = 'PAGE_VIEW',
 }
 
 export type HomeProductRails = {
@@ -1016,13 +1134,54 @@ export type BehaviorEventInput = {
   productId?: string | null;
   query?: string | null;
   locale?: Locale | null;
+  currency?: Currency | null;
   path?: string | null;
   sessionId?: string | null;
+  userId?: string | null;
   occurredAt?: string | null;
 };
 
 export type BehaviorBatchResponse = {
   accepted: number;
+};
+
+export type AdminBehaviorTopProductDto = {
+  productId: string;
+  productName: string;
+  productSlug: string;
+  clickCount: number;
+};
+
+export type AdminBehaviorTopSearchDto = {
+  query: string;
+  count: number;
+};
+
+export type AdminBehaviorRecentEventDto = {
+  id: string;
+  type: BehaviorEventType;
+  productId?: string | null;
+  query?: string | null;
+  path?: string | null;
+  sessionId?: string | null;
+  userId?: string | null;
+  createdAt: string;
+};
+
+export type AdminBehaviorStatsResponse = {
+  days: number;
+  from: string;
+  to: string;
+  marketCode: MarketCode | null;
+  totals: {
+    searches: number;
+    productClicks: number;
+    pageViews: number;
+    uniqueSessions: number;
+  };
+  topProducts: AdminBehaviorTopProductDto[];
+  topSearches: AdminBehaviorTopSearchDto[];
+  recentEvents: AdminBehaviorRecentEventDto[];
 };
 
 export type MerchandisingRailItemDto = {
@@ -1094,6 +1253,8 @@ export enum EmailTemplateType {
   ADMIN_LOW_STOCK = 'ADMIN_LOW_STOCK',
   MARKETING = 'MARKETING',
   NEWSLETTER_WELCOME = 'NEWSLETTER_WELCOME',
+  ACCOUNT_BLOCKED = 'ACCOUNT_BLOCKED',
+  ACCOUNT_UNBLOCKED = 'ACCOUNT_UNBLOCKED',
   RAW = 'RAW',
 }
 
@@ -1115,6 +1276,16 @@ export type EmailLogListResponse = {
   total: number;
   page: number;
   pageSize: number;
+};
+
+export type MailRecipientType = 'NEW_ORDER' | 'STOCK_ALERT';
+
+export type MailRecipientDto = {
+  id: string;
+  email: string;
+  type: MailRecipientType;
+  verifiedAt: string | null;
+  createdAt: string;
 };
 
 export enum NewsletterStatus {
@@ -1197,4 +1368,94 @@ export type LoyaltyAccountDto = {
   balance: number;
   config: LoyaltyConfigDto;
   ledger: LoyaltyLedgerEntryDto[];
+};
+
+export enum SupportTicketTopic {
+  REFUND = 'REFUND',
+  WEBSITE = 'WEBSITE',
+  ORDER = 'ORDER',
+  OTHER = 'OTHER',
+}
+
+export enum SupportTicketStatus {
+  OPEN = 'OPEN',
+  IN_PROGRESS = 'IN_PROGRESS',
+  CLOSED = 'CLOSED',
+}
+
+export type FaqItemTranslationDto = {
+  locale: Locale;
+  question: string;
+  answer: string;
+};
+
+export type FaqItemDto = {
+  id: string;
+  category?: string | null;
+  sortOrder: number;
+  published: boolean;
+  question: string;
+  answer: string;
+  locale?: Locale;
+  marketCode?: MarketCode;
+  translations?: FaqItemTranslationDto[];
+};
+
+export type FaqListResponse = {
+  items: FaqItemDto[];
+  locale?: Locale;
+};
+
+export type AdminFaqListResponse = {
+  items: FaqItemDto[];
+};
+
+export type SupportTicketAttachmentDto = {
+  id: string;
+  mediaId: string;
+  url: string;
+  filename?: string | null;
+  mimeType?: string | null;
+  sortOrder: number;
+};
+
+export type SupportTicketDto = {
+  id: string;
+  topic: SupportTicketTopic;
+  status: SupportTicketStatus;
+  subject: string;
+  message: string;
+  name?: string | null;
+  email: string;
+  locale: Locale;
+  marketCode?: MarketCode;
+  orderNumber?: string | null;
+  adminNotes?: string | null;
+  customerId?: string | null;
+  customerEmail?: string | null;
+  orderId?: string | null;
+  orderDisplayNumber?: string | null;
+  attachments: SupportTicketAttachmentDto[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SupportTicketCreateResult = {
+  id: string;
+  status: SupportTicketStatus;
+};
+
+/** Public ticket lookup / “my tickets” list row (trimmed). */
+export type SupportTicketLookupDto = {
+  id: string;
+  status: SupportTicketStatus;
+  subject: string;
+  createdAt: string;
+};
+
+export type AdminSupportTicketListResponse = {
+  items: SupportTicketDto[];
+  total: number;
+  page: number;
+  pageSize: number;
 };

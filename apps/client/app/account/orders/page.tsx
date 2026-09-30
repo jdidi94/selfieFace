@@ -1,12 +1,25 @@
 'use client';
 
+import { LocaleLink } from '@/components/locale-link';
 import { authFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
-import { Badge, Button, LoadingState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@lumea/ui';
+import { orderStatusLabel } from '@/lib/order-labels';
+import { formatOrderMoney } from '@/lib/order-money';
+import {
+  Badge,
+  Button,
+  EmptyState,
+  LoadingState,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@lumea/ui';
 import type { OrderDto } from '@lumea/types';
-import { formatMoney } from '@lumea/utils';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -47,7 +60,15 @@ export default function AccountOrdersPage() {
       </div>
 
       {orders.length === 0 ? (
-        <p className="text-muted-foreground">{t.ordersEmpty}</p>
+        <EmptyState
+          title={t.ordersEmptyTitle}
+          description={t.ordersEmptyDescription}
+          action={
+            <Button asChild>
+              <LocaleLink href="/shop">{t.browseShop}</LocaleLink>
+            </Button>
+          }
+        />
       ) : (
         <div className="rounded-lg border border-border">
           <Table>
@@ -68,10 +89,10 @@ export default function AccountOrdersPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline">{order.status}</Badge>
+                    <Badge variant="outline">{orderStatusLabel(order.status, t)}</Badge>
                   </TableCell>
                   <TableCell className="text-end">
-                    {formatMoney(order.total, order.currency)}
+                    {formatOrderMoney(order.total, order.currency, locale)}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {new Date(order.createdAt).toLocaleDateString(locale)}

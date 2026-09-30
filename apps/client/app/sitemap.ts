@@ -9,6 +9,10 @@ import { languageAlternates, siteUrl } from '@/lib/seo';
 import { withMarketLocale } from '@/lib/market-path';
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
+/** Match products/journal public list max pageSize (validation max 48). */
+const PAGE_SIZE = 48;
+/** Cap pages to avoid runaway sitemap builds if the API misbehaves. */
+const MAX_PAGES = 50;
 
 type SlugRow = { slug: string; updatedAt?: string };
 
@@ -22,24 +26,57 @@ async function fetchJson<T>(path: string): Promise<T | null> {
   }
 }
 
-async function fetchSlugs(path: string): Promise<SlugRow[]> {
-  const data = await fetchJson<unknown>(path);
+function extractSlugs(data: unknown): SlugRow[] {
   if (!data) return [];
-  if (Array.isArray(data)) {
-    return data
-      .map((row) => {
-        const r = row as { slug?: string };
-        return r.slug ? { slug: r.slug } : null;
-      })
-      .filter((x): x is SlugRow => !!x);
+  const rows: { slug?: string; updatedAt?: string }[] = Array.isArray(data)
+    ? data
+    : typeof data === 'object' && data && 'items' in data
+      ? ((data as { items: { slug?: string; updatedAt?: string }[] }).items ?? [])
+      : [];
+  const out: SlugRow[] = [];
+  for (const row of rows) {
+    if (!row.slug) continue;
+    out.push({ slug: row.slug, updatedAt: row.updatedAt });
   }
-  if (typeof data === 'object' && data && 'items' in data) {
-    const items = (data as { items: { slug?: string }[] }).items ?? [];
-    return items
-      .map((row) => (row.slug ? { slug: row.slug } : null))
-      .filter((x): x is SlugRow => !!x);
+  return out;
+}
+
+/** Paginate list endpoints until all slugs are collected (or caps hit). */
+async function fetchAllSlugs(basePath: string): Promise<SlugRow[]> {
+  const collected: SlugRow[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const sep = basePath.includes('?') ? '&' : '?';
+    const data = await fetchJson<unknown>(
+      `${basePath}${sep}page=${page}&pageSize=${PAGE_SIZE}`,
+    );
+    if (!data) break;
+
+    const rows = extractSlugs(data);
+    for (const row of rows) {
+      if (seen.has(row.slug)) continue;
+      seen.add(row.slug);
+      collected.push(row);
+    }
+
+    const total =
+      typeof data === 'object' && data && 'total' in data
+        ? Number((data as { total?: number }).total)
+        : undefined;
+    const pageSize =
+      typeof data === 'object' && data && 'pageSize' in data
+        ? Number((data as { pageSize?: number }).pageSize) || PAGE_SIZE
+        : PAGE_SIZE;
+
+    if (rows.length === 0) break;
+    if (rows.length < pageSize) break;
+    if (typeof total === 'number' && Number.isFinite(total) && collected.length >= total) {
+      break;
+    }
   }
-  return [];
+
+  return collected;
 }
 
 async function enabledMarkets(): Promise<MarketCode[]> {
@@ -73,23 +110,39 @@ function marketLocaleEntries(
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const markets = await enabledMarkets();
-  const staticPaths = ['/', '/shop', '/journal', '/cart', '/wishlist'] as const;
+  const staticPaths = [
+    '/',
+    '/shop',
+    '/journal',
+    '/help',
+    '/about',
+    '/contact',
+    '/orders/track',
+    '/track-order',
+    '/legal/privacy',
+    '/legal/terms',
+    '/legal/cookies',
+    '/legal/shipping',
+    '/legal/returns',
+  ] as const;
 
   const entries: MetadataRoute.Sitemap = [];
 
   for (const market of markets) {
     const currency = CURRENCY_BY_MARKET[market];
     const [products, categories, journal] = await Promise.all([
-      fetchSlugs(`/products?page=1&pageSize=48&locale=en&currency=${currency}`),
-      fetchSlugs(`/categories?locale=en&currency=${currency}`),
-      fetchSlugs(`/journal?page=1&pageSize=48&locale=en&currency=${currency}`),
+      fetchAllSlugs(`/products?locale=en&currency=${currency}`),
+      fetchJson<unknown>(`/categories?locale=en&currency=${currency}`).then(extractSlugs),
+      fetchAllSlugs(`/journal?locale=en&currency=${currency}`),
     ]);
 
     for (const path of staticPaths) {
+      const isHome = path === '/';
+      const isHighTraffic = path === '/' || path === '/shop';
       entries.push(
         ...marketLocaleEntries(path, market, {
-          changeFrequency: path === '/' || path === '/shop' ? 'daily' : 'weekly',
-          priority: path === '/' ? 1 : 0.7,
+          changeFrequency: isHighTraffic ? 'daily' : 'weekly',
+          priority: isHome ? 1 : path.startsWith('/legal/') ? 0.4 : 0.7,
         }),
       );
     }
@@ -99,6 +152,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         ...marketLocaleEntries(`/products/${p.slug}`, market, {
           changeFrequency: 'weekly',
           priority: 0.8,
+          lastModified: p.updatedAt,
         }),
       );
     }
@@ -107,6 +161,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         ...marketLocaleEntries(`/shop/category/${c.slug}`, market, {
           changeFrequency: 'weekly',
           priority: 0.6,
+          lastModified: c.updatedAt,
         }),
       );
     }
@@ -115,6 +170,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         ...marketLocaleEntries(`/journal/${j.slug}`, market, {
           changeFrequency: 'monthly',
           priority: 0.5,
+          lastModified: j.updatedAt,
         }),
       );
     }

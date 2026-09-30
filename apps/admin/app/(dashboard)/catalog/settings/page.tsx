@@ -1,30 +1,17 @@
 'use client';
 
 import { FormErrorBanner } from '@/components/form-errors';
+import { SettingsSubnav } from '@/components/settings-subnav';
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminMarket } from '@/lib/market-context';
 import { submitErrorState, validateWithSchema } from '@/lib/validate-form';
 import { storeSettingsUpdateSchema } from '@lumea/validation';
-import type { ShippingMethodDto, StoreSettingsDto } from '@lumea/types';
+import type { StoreSettingsDto } from '@lumea/types';
 import { Button, Input, Label, LoadingState } from '@lumea/ui';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 
-type SecretDraft = {
-  stripeSecretKey: string;
-  stripePublishableKey: string;
-  konnectApiKey: string;
-  konnectWalletId: string;
-};
-
-type SectionId =
-  | 'tax'
-  | 'inventory'
-  | 'loyalty'
-  | 'payments'
-  | 'shipping'
-  | 'contact'
-  | 'legacy';
+type SectionId = 'tax' | 'inventory' | 'loyalty' | 'refunds';
 
 function confirmSave(sectionLabel: string): boolean {
   return window.confirm(
@@ -36,12 +23,6 @@ export default function StoreSettingsPage() {
   const { accessToken, loading: authLoading } = useAuth();
   const { market } = useAdminMarket();
   const [settings, setSettings] = useState<StoreSettingsDto | null>(null);
-  const [secrets, setSecrets] = useState<SecretDraft>({
-    stripeSecretKey: '',
-    stripePublishableKey: '',
-    konnectApiKey: '',
-    konnectWalletId: '',
-  });
   const [pendingSection, setPendingSection] = useState<SectionId | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,15 +30,7 @@ export default function StoreSettingsPage() {
   useEffect(() => {
     if (authLoading || !accessToken) return;
     void adminFetch<StoreSettingsDto>('/admin/settings', accessToken, { skipCache: true }).then(
-      (data) => {
-        setSettings(data);
-        setSecrets({
-          stripeSecretKey: '',
-          stripePublishableKey: data.stripePublishableKey ?? '',
-          konnectApiKey: '',
-          konnectWalletId: data.konnectWalletId ?? '',
-        });
-      },
+      setSettings,
     );
   }, [accessToken, authLoading, market]);
 
@@ -88,12 +61,6 @@ export default function StoreSettingsPage() {
         body: JSON.stringify(validated.data),
       });
       setSettings(updated);
-      setSecrets({
-        stripeSecretKey: '',
-        stripePublishableKey: updated.stripePublishableKey ?? '',
-        konnectApiKey: '',
-        konnectWalletId: updated.konnectWalletId ?? '',
-      });
       setMessage(`${label} saved.`);
     } catch (err) {
       setError(submitErrorState(err).message);
@@ -123,37 +90,6 @@ export default function StoreSettingsPage() {
           }
         />
       </div>
-    );
-  }
-
-  function textField(key: keyof StoreSettingsDto, label: string, hint?: string) {
-    return (
-      <div className="space-y-2">
-        <Label htmlFor={String(key)}>{label}</Label>
-        {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
-        <Input
-          id={String(key)}
-          value={String(settings![key] ?? '')}
-          onChange={(e) =>
-            setSettings((prev) =>
-              prev ? { ...prev, [key]: e.target.value || null } : prev,
-            )
-          }
-        />
-      </div>
-    );
-  }
-
-  function updateMethod(id: string, patch: Partial<ShippingMethodDto>) {
-    setSettings((prev) =>
-      prev
-        ? {
-            ...prev,
-            shippingMethods: prev.shippingMethods.map((m) =>
-              m.id === id ? { ...m, ...patch } : m,
-            ),
-          }
-        : prev,
     );
   }
 
@@ -202,9 +138,11 @@ export default function StoreSettingsPage() {
       <div>
         <h1 className="font-display text-3xl">Store settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Each block saves on its own. You will be asked to confirm before changes go live.
-          Money fields use minor units (100 = 1.00).
+          Tax, inventory alerts, loyalty, and refund policy for this market. Each block saves on
+          its own — no full page reload. Shipping, contact, and payments live under their own
+          tabs. Money fields use minor units (100 = 1.00).
         </p>
+        <SettingsSubnav className="mt-4" />
       </div>
 
       {error ? <FormErrorBanner message={error} /> : null}
@@ -306,315 +244,96 @@ export default function StoreSettingsPage() {
       </Section>
 
       <Section
-        section="payments"
-        title="Payment methods"
-        explanation="Cash on delivery is available in every currency. Card checkout uses Stripe for AED and USD (when Stripe is enabled and keys are set), and Konnect for TND (when Konnect is enabled and keys are set). Currency comes from the storefront cookie."
+        section="refunds"
+        title="Refund policy"
+        explanation="Controls admin return refunds for captured card payments in this market. Pre-fulfillment (pending/processing) always refunds the full order total. Shipped/delivered orders use the rules below. Stripe is charged the computed amount unless overridden on the order."
         onSave={(e) => {
           e.preventDefault();
-          const body: Record<string, unknown> = {
-            cashOnDeliveryEnabled: settings.cashOnDeliveryEnabled,
-            cardPaymentEnabled: settings.cardPaymentEnabled,
-            stripeEnabled: settings.stripeEnabled,
-            konnectEnabled: settings.konnectEnabled,
-            konnectSandbox: settings.konnectSandbox,
-          };
-          if (secrets.stripeSecretKey.trim()) {
-            body.stripeSecretKey = secrets.stripeSecretKey.trim();
-          }
-          if (secrets.stripePublishableKey.trim()) {
-            body.stripePublishableKey = secrets.stripePublishableKey.trim();
-          }
-          if (secrets.konnectApiKey.trim()) {
-            body.konnectApiKey = secrets.konnectApiKey.trim();
-          }
-          if (secrets.konnectWalletId.trim()) {
-            body.konnectWalletId = secrets.konnectWalletId.trim();
-          }
-          void saveSection('payments', 'Payment methods', body);
-        }}
-      >
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={settings.cashOnDeliveryEnabled}
-            onChange={(e) => toggle('cashOnDeliveryEnabled', e.target.checked)}
-          />
-          Cash on delivery (COD)
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={settings.cardPaymentEnabled}
-            onChange={(e) => toggle('cardPaymentEnabled', e.target.checked)}
-          />
-          Card payment (master switch)
-        </label>
-
-        <div className="space-y-3 border-t border-border pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Stripe (AED / USD)</h3>
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                checked={settings.stripeEnabled}
-                onChange={(e) => toggle('stripeEnabled', e.target.checked)}
-              />
-              Enabled
-            </label>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Shown at checkout when the currency cookie is AED or USD, card payment is on, and
-            keys are configured. Secret:{' '}
-            {settings.stripeSecretKeySet ? 'configured' : 'not set'} (env fallback supported).
-            Leave secret blank to keep the current value.
-          </p>
-          <div className="space-y-2">
-            <Label>Stripe secret key</Label>
-            <Input
-              type="password"
-              autoComplete="off"
-              value={secrets.stripeSecretKey}
-              onChange={(e) =>
-                setSecrets((s) => ({ ...s, stripeSecretKey: e.target.value }))
-              }
-              placeholder="sk_live_… or sk_test_…"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Stripe publishable key</Label>
-            <Input
-              value={secrets.stripePublishableKey}
-              onChange={(e) =>
-                setSecrets((s) => ({ ...s, stripePublishableKey: e.target.value }))
-              }
-              placeholder="pk_live_… or pk_test_…"
-            />
-          </div>
-        </div>
-
-        <div className="space-y-3 border-t border-border pt-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-sm font-medium">Konnect (TND)</h3>
-            <div className="flex gap-4 text-xs text-muted-foreground">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={settings.konnectEnabled}
-                  onChange={(e) => toggle('konnectEnabled', e.target.checked)}
-                />
-                Enabled
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={settings.konnectSandbox}
-                  onChange={(e) => toggle('konnectSandbox', e.target.checked)}
-                />
-                Sandbox
-              </label>
-            </div>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Shown at checkout when the currency cookie is TND, card payment is on, and API key +
-            wallet ID are set. API key: {settings.konnectApiKeySet ? 'configured' : 'not set'}.
-          </p>
-          <div className="space-y-2">
-            <Label>Konnect API key</Label>
-            <Input
-              type="password"
-              autoComplete="off"
-              value={secrets.konnectApiKey}
-              onChange={(e) => setSecrets((s) => ({ ...s, konnectApiKey: e.target.value }))}
-              placeholder="orgId:secret…"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Konnect wallet ID</Label>
-            <Input
-              value={secrets.konnectWalletId}
-              onChange={(e) => setSecrets((s) => ({ ...s, konnectWalletId: e.target.value }))}
-              placeholder="receiverWalletId"
-            />
-          </div>
-        </div>
-      </Section>
-
-      <Section
-        section="shipping"
-        title="Shipping"
-        explanation="Customers pick one method at checkout. Mark “Free shipping eligible” on Standard so cart total ≥ threshold makes that option free. Domestic country codes decide which zone applies."
-        onSave={(e) => {
-          e.preventDefault();
-          void saveSection('shipping', 'Shipping', {
-            domesticCountries: settings.domesticCountries,
-            freeShippingEnabled: settings.freeShippingEnabled,
-            freeShippingThreshold: settings.freeShippingThreshold,
-            shippingMethods: settings.shippingMethods,
+          void saveSection('refunds', 'Refund policy', {
+            refundWindowDays: settings.refundWindowDays,
+            refundWindowAfterShip: settings.refundWindowAfterShip,
+            refundAllowedAfterShipped: settings.refundAllowedAfterShipped,
+            refundAllowedAfterDelivered: settings.refundAllowedAfterDelivered,
+            refundShippingRefundable: settings.refundShippingRefundable,
+            refundTaxRefundable: settings.refundTaxRefundable,
+            refundRestockingFeeBps: settings.refundRestockingFeeBps,
+            refundDefaultPartialBps: settings.refundDefaultPartialBps,
           });
         }}
       >
-        {textField(
-          'domesticCountries',
-          'Domestic country codes (comma-separated)',
-          'Example: TN,AE,US. Other countries use international rates.',
+        {numField(
+          'refundWindowDays',
+          'Refund window (days)',
+          '0 = no time limit. Counted from delivery by default, or from ship if “Window starts at ship” is on.',
         )}
-        <div className="space-y-3 rounded-md border border-border p-3">
-          <h3 className="text-sm font-medium">Free shipping</h3>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.refundWindowAfterShip}
+            onChange={(e) => toggle('refundWindowAfterShip', e.target.checked)}
+          />
+          Window starts at ship (otherwise delivery)
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.refundAllowedAfterShipped}
+            onChange={(e) => toggle('refundAllowedAfterShipped', e.target.checked)}
+          />
+          Allow refund while SHIPPED
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.refundAllowedAfterDelivered}
+            onChange={(e) => toggle('refundAllowedAfterDelivered', e.target.checked)}
+          />
+          Allow refund while DELIVERED
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.refundShippingRefundable}
+            onChange={(e) => toggle('refundShippingRefundable', e.target.checked)}
+          />
+          Shipping refundable on returns
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={settings.refundTaxRefundable}
+            onChange={(e) => toggle('refundTaxRefundable', e.target.checked)}
+          />
+          Tax refundable on returns (proportional)
+        </label>
+        {numField(
+          'refundRestockingFeeBps',
+          'Restocking fee (basis points of merchandise)',
+          'Example: 1000 = 10% of refunded merchandise. Applied on returns only.',
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="refundDefaultPartialBps">
+            Default merchandise refund (basis points, blank = 100%; 5000 = 50%)
+          </Label>
           <p className="text-xs text-muted-foreground">
-            Optional. Values use this market’s currency (working market switcher). When disabled,
-            the threshold and progress UI are ignored. Methods still need “Free shipping eligible”
-            checked.
+            Applied to (subtotal − discount) on shipped/delivered returns.
           </p>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={settings.freeShippingEnabled}
-              onChange={(e) => toggle('freeShippingEnabled', e.target.checked)}
-            />
-            Enable free shipping
-          </label>
-          {numField(
-            'freeShippingThreshold',
-            'Threshold (minor units)',
-            settings.freeShippingEnabled ? undefined : 'Disabled for this market.',
-          )}
-        </div>
-        <div className="space-y-4">
-          {settings.shippingMethods.map((method, index) => (
-            <div
-              key={method.id}
-              className="space-y-3 rounded-lg border border-border bg-surface-muted/40 p-4"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-medium">
-                  Option {index + 1} ·{' '}
-                  <span className="text-muted-foreground">{method.code}</span>
-                </p>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={method.isActive}
-                    onChange={(e) => updateMethod(method.id, { isActive: e.target.checked })}
-                  />
-                  Active
-                </label>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Name</Label>
-                  <Input
-                    value={method.name}
-                    onChange={(e) => updateMethod(method.id, { name: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Description</Label>
-                  <Input
-                    value={method.description ?? ''}
-                    onChange={(e) =>
-                      updateMethod(method.id, { description: e.target.value || null })
+          <Input
+            id="refundDefaultPartialBps"
+            value={settings.refundDefaultPartialBps ?? ''}
+            onChange={(e) =>
+              setSettings((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      refundDefaultPartialBps: e.target.value.trim()
+                        ? Number(e.target.value) || 0
+                        : null,
                     }
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Price (minor units, market currency)</Label>
-                <Input
-                  value={method.price}
-                  onChange={(e) =>
-                    updateMethod(method.id, { price: Number(e.target.value) || 0 })
-                  }
-                />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="space-y-2">
-                  <Label>Est. days min</Label>
-                  <Input
-                    value={method.estimatedDaysMin ?? ''}
-                    onChange={(e) =>
-                      updateMethod(method.id, {
-                        estimatedDaysMin: e.target.value
-                          ? Number(e.target.value) || null
-                          : null,
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Est. days max</Label>
-                  <Input
-                    value={method.estimatedDaysMax ?? ''}
-                    onChange={(e) =>
-                      updateMethod(method.id, {
-                        estimatedDaysMax: e.target.value
-                          ? Number(e.target.value) || null
-                          : null,
-                      })
-                    }
-                  />
-                </div>
-                <label className="flex items-end gap-2 pb-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={method.eligibleForFreeShipping}
-                    onChange={(e) =>
-                      updateMethod(method.id, {
-                        eligibleForFreeShipping: e.target.checked,
-                      })
-                    }
-                  />
-                  Free shipping eligible
-                </label>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <Section
-        section="contact"
-        title="Storefront contact"
-        explanation="Contact details for this market window only. Leave a field blank to hide it on the storefront footer."
-        onSave={(e) => {
-          e.preventDefault();
-          void saveSection('contact', 'Storefront contact', {
-            contactWhatsapp: settings.contactWhatsapp,
-            contactPhone: settings.contactPhone,
-            contactFacebook: settings.contactFacebook,
-            contactInstagram: settings.contactInstagram,
-            contactEmail: settings.contactEmail,
-          });
-        }}
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          {textField(
-            'contactWhatsapp',
-            'WhatsApp',
-            'Full URL or phone digits (e.g. https://wa.me/216… or +216…).',
-          )}
-          {textField('contactPhone', 'Phone')}
-          {textField('contactFacebook', 'Facebook URL')}
-          {textField('contactInstagram', 'Instagram URL')}
-          {textField('contactEmail', 'Email')}
-        </div>
-      </Section>
-
-      <Section
-        section="legacy"
-        title="Legacy zone flat rates"
-        explanation="Used only if no shipping methods exist. Prefer the shipping methods section above. Amounts are in this market’s currency."
-        saveLabel="Save legacy rates"
-        onSave={(e) => {
-          e.preventDefault();
-          void saveSection('legacy', 'Legacy zone flat rates', {
-            domesticShipping: settings.domesticShipping,
-            internationalShipping: settings.internationalShipping,
-          });
-        }}
-      >
-        <div className="grid gap-4 sm:grid-cols-2">
-          {numField('domesticShipping', 'Domestic shipping (minor units)')}
-          {numField('internationalShipping', 'Intl shipping (minor units)')}
+                  : prev,
+              )
+            }
+          />
         </div>
       </Section>
     </div>

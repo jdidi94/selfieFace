@@ -30,6 +30,11 @@ enum ProductKind {
   PACK
 }
 
+enum CategoryKind {
+  CATEGORY
+  PROBLEM
+}
+
 enum InventoryReason {
   SALE
   RESTOCK
@@ -78,6 +83,11 @@ enum CouponType {
   FIXED
 }
 
+enum MailRecipientType {
+  NEW_ORDER
+  STOCK_ALERT
+}
+
 /// How product filters apply when computing the discountable subtotal.
 enum CouponProductScope {
   ALL
@@ -95,6 +105,7 @@ enum MerchandisingRailKind {
 enum BehaviorEventType {
   SEARCH
   PRODUCT_CLICK
+  PAGE_VIEW
 }
 
 model SchemaMeta {
@@ -126,7 +137,12 @@ model Market {
   brands               Brand[]
   warehouses           Warehouse[]
   journalArticles      JournalArticle[]
+  faqItems             FaqItem[]
+  supportTickets       SupportTicket[]
   searchInsights       SearchInsight[]
+  behaviorEvents       BehaviorEvent[]
+  legalDocuments      LegalDocument[]
+  mailRecipients      MailRecipient[]
 }
 
 model User {
@@ -140,6 +156,8 @@ model User {
   lastName        String?
   /// Set when the customer confirms their email (or trusts Google OAuth).
   emailVerifiedAt DateTime?
+  /// When set, the account cannot sign in / refresh / use OAuth.
+  blockedAt       DateTime?
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
@@ -148,6 +166,7 @@ model User {
   passwordResetTokens      PasswordResetToken[]
   emailVerificationTokens  EmailVerificationToken[]
   oauthExchangeTokens      OAuthExchangeToken[]
+  behaviorEvents           BehaviorEvent[]
 }
 
 model Customer {
@@ -158,6 +177,7 @@ model Customer {
   /// Guest checkout contact email (registered customers use User.email).
   email             String?
   isGuest           Boolean   @default(false)
+  emailNotificationsEnabled Boolean @default(true)
   preferredLocale   Locale?
   preferredCurrency Currency?
   createdAt         DateTime  @default(now())
@@ -170,6 +190,7 @@ model Customer {
   couponRedemptions CouponRedemption[]
   stockNotifySubscriptions StockNotifySubscription[]
   loyaltyAccount    LoyaltyAccount?
+  supportTickets    SupportTicket[]
 
   @@index([phone])
   @@index([email])
@@ -233,6 +254,11 @@ model Category {
   sortOrder    Int                   @default(0)
   marketId     String
   market       Market                @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  kind         CategoryKind          @default(CATEGORY)
+  parentCategoryId String?
+  parentCategory Category?           @relation("CategoryTree", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  childCategories Category[]         @relation("CategoryTree")
+  problemProducts Product[]          @relation("ProductProblems")
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
   products     Product[]
@@ -240,6 +266,8 @@ model Category {
 
   @@unique([marketId, slug])
   @@index([marketId])
+  @@index([parentCategoryId])
+  @@index([marketId, kind])
 }
 
 model CategoryTranslation {
@@ -302,11 +330,16 @@ model Product {
   benefits         String?
   howToUse         String?
   suitableFor      String?
+  /// Optional competitor reference price in this product's market currency.
+  competitorPriceAmount Int?
+  competitorPriceSource String?
+  competitorPriceCheckedAt DateTime?
   categoryId       String
   category         Category             @relation(fields: [categoryId], references: [id])
+  problemCategories Category[]           @relation("ProductProblems")
   brandId          String
   brand            Brand                @relation(fields: [brandId], references: [id])
-  /// Required market window — catalogs are separate (no copy between markets).
+  /// Required market window — catalogs are separate per market; admin can copy entities between windows.
   marketId         String
   market           Market               @relation(fields: [marketId], references: [id], onDelete: Restrict)
   popularityScore  Int                  @default(0)
@@ -471,6 +504,7 @@ model Media {
   journalArticles JournalArticle[]
   journalImages   JournalArticleImage[]
   promoBanners    PromoBanner[]
+  ticketAttachments SupportTicketAttachment[]
 }
 
 model JournalArticle {
@@ -710,6 +744,7 @@ model Order {
   paymentProvider       String?
   konnectPaymentRef     String?       @unique
   guestAccessToken      String?       @unique
+  policiesAcceptedAt    DateTime?
   /// Client/header key so retries do not create duplicate orders.
   idempotencyKey        String?       @unique
   couponId              String?
@@ -719,12 +754,15 @@ model Order {
   loyaltyPointsRedeemed Int           @default(0)
   /// Points earned after payment becomes eligible (CAPTURED / COD AUTHORIZED).
   loyaltyPointsEarned   Int           @default(0)
+  /// When set, admin (and customer) status changes are rejected until unlocked.
+  lockedAt              DateTime?
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
   items                 OrderItem[]
   timelineEvents        OrderTimelineEvent[]
   couponRedemption      CouponRedemption?
   loyaltyLedger         LoyaltyLedgerEntry[]
+  supportTickets        SupportTicket[]
 
   @@index([customerId])
   @@index([status])
@@ -841,7 +879,58 @@ model StoreSettings {
   loyaltyMaxRedeemBps       Int?
   /// Points granted once when a registered customer’s loyalty account is created.
   loyaltySignupBonusPoints  Int      @default(0)
+  /// Days after ship/delivery during which admin returns (refunds) are allowed. 0 = no time limit.
+  refundWindowDays             Int      @default(14)
+  /// When true, window starts from SHIPPED timeline; otherwise from DELIVERED (falls back to shipped/created).
+  refundWindowAfterShip        Boolean  @default(false)
+  /// Allow issuing a refund while status is SHIPPED.
+  refundAllowedAfterShipped    Boolean  @default(true)
+  /// Allow issuing a refund while status is DELIVERED.
+  refundAllowedAfterDelivered  Boolean  @default(true)
+  /// Include shipping in computed return refunds (pre-fulfillment always refunds shipping).
+  refundShippingRefundable     Boolean  @default(false)
+  /// Include tax (proportional to refunded merchandise ± shipping) in return refunds.
+  refundTaxRefundable          Boolean  @default(true)
+  /// Restocking fee as bps of refunded merchandise (return refunds only).
+  refundRestockingFeeBps       Int      @default(0)
+  /// Default merchandise share to refund in bps (10000 = 100%). Null = full merchandise.
+  refundDefaultPartialBps      Int?
+  mailingEnabled               Boolean  @default(true)
+  mailLogsEnabled              Boolean  @default(true)
+  customerOrderEmailsEnabled   Boolean  @default(true)
+  adminOrderEmailsEnabled      Boolean  @default(true)
+  adminStockEmailsEnabled      Boolean  @default(true)
   updatedAt                 DateTime @updatedAt
+}
+
+model LegalDocument {
+  id        String   @id @default(cuid())
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  slug      String
+  locale    Locale
+  title     String
+  content   String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@unique([marketId, slug, locale])
+  @@index([marketId, slug])
+}
+
+model MailRecipient {
+  id                    String            @id @default(cuid())
+  marketId              String
+  market                Market            @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  email                 String
+  type                  MailRecipientType
+  verifiedAt            DateTime?
+  verificationTokenHash String?           @unique
+  verificationExpiresAt DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@unique([marketId, email, type])
+  @@index([marketId, type, verifiedAt])
 }
 
 enum LoyaltyLedgerType {
@@ -1072,11 +1161,19 @@ model BehaviorEvent {
   locale    Locale?
   path      String?
   sessionId String?
+  /// Set when the visitor was signed in at collect time (nullable for anonymous).
+  userId    String?
+  user      User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// Resolved from visitor currency at ingest (nullable for legacy rows).
+  marketId  String?
+  market    Market?           @relation(fields: [marketId], references: [id], onDelete: SetNull)
   createdAt DateTime          @default(now())
 
   @@index([type, createdAt])
   @@index([productId])
   @@index([sessionId])
+  @@index([userId, createdAt])
+  @@index([marketId, type, createdAt])
 }
 
 enum EmailLogStatus {
@@ -1098,6 +1195,8 @@ enum EmailTemplateType {
   ADMIN_LOW_STOCK
   MARKETING
   NEWSLETTER_WELCOME
+  ACCOUNT_BLOCKED
+  ACCOUNT_UNBLOCKED
   RAW
 }
 
@@ -1142,4 +1241,91 @@ model NewsletterSubscriber {
   @@index([status])
   @@index([subscribedAt])
   @@index([locale])
+}
+
+enum SupportTicketTopic {
+  REFUND
+  WEBSITE
+  ORDER
+  OTHER
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+/// FAQ entry scoped to a market; translations for en/fr/ar.
+model FaqItem {
+  id           String               @id @default(cuid())
+  /// Free-text category label (e.g. Shipping, Returns) shown in admin/storefront grouping.
+  category     String?
+  sortOrder    Int                  @default(0)
+  published    Boolean              @default(false)
+  marketId     String
+  market       Market               @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  translations FaqItemTranslation[]
+
+  @@index([marketId, published, sortOrder])
+  @@index([marketId, sortOrder])
+}
+
+model FaqItemTranslation {
+  id        String   @id @default(cuid())
+  faqItemId String
+  faqItem   FaqItem  @relation(fields: [faqItemId], references: [id], onDelete: Cascade)
+  locale    Locale
+  question  String
+  answer    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([faqItemId, locale])
+  @@index([locale])
+}
+
+/// Storefront contact / customer-service ticket (market-scoped inbox).
+model SupportTicket {
+  id          String                 @id @default(cuid())
+  topic       SupportTicketTopic
+  status      SupportTicketStatus    @default(OPEN)
+  subject     String
+  message     String
+  name        String?
+  email       String
+  locale      Locale                 @default(en)
+  marketId    String
+  market      Market                 @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  customerId  String?
+  customer    Customer?              @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId     String?
+  order       Order?                 @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  /// Optional order number as submitted by the guest (resolved to orderId when found).
+  orderNumber String?
+  adminNotes  String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+  attachments SupportTicketAttachment[]
+
+  @@index([marketId, status, createdAt])
+  @@index([status, createdAt])
+  @@index([email])
+  @@index([customerId])
+  @@index([orderId])
+}
+
+model SupportTicketAttachment {
+  id        String        @id @default(cuid())
+  ticketId  String
+  ticket    SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  mediaId   String
+  media     Media         @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  sortOrder Int           @default(0)
+  createdAt DateTime      @default(now())
+
+  @@index([ticketId])
+  @@index([mediaId])
 }

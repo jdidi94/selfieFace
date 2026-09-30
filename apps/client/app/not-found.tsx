@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import Link from 'next/link';
 import { Locale } from '@lumea/types';
 import { getMessages } from '@/lib/messages';
+import { LOCALE_COOKIE, LOCALE_COOKIE_LEGACY } from '@/lib/storefront-cookies';
 
 function parseLocale(value?: string): Locale {
   if (value === Locale.AR) return Locale.AR;
@@ -11,7 +12,9 @@ function parseLocale(value?: string): Locale {
 
 export default async function NotFound() {
   const cookieStore = await cookies();
-  const locale = parseLocale(cookieStore.get('lumea_locale')?.value);
+  const locale = parseLocale(
+    cookieStore.get(LOCALE_COOKIE)?.value ?? cookieStore.get(LOCALE_COOKIE_LEGACY)?.value,
+  );
   const t = getMessages(locale);
 
   return (

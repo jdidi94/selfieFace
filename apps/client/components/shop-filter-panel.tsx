@@ -18,6 +18,7 @@ function filterKey(values: ShopFilterValues) {
   return [
     values.q,
     values.category,
+    values.problemCategory,
     values.brand,
     values.minPrice,
     values.maxPrice,
@@ -58,6 +59,9 @@ function FilterFields({
 
   return (
     <>
+      {values.problemCategory ? (
+        <input type="hidden" name="problemCategory" value={values.problemCategory} />
+      ) : null}
       <p className="text-sm">
         <Link href="/search" className="text-accent underline-offset-2 hover:underline">
           {t.search}
@@ -125,26 +129,26 @@ function FilterFields({
 
       <div className="grid grid-cols-2 gap-2">
         <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">Sort</span>
+          <span className="mb-1 block text-muted-foreground">{t.sortByLabel}</span>
           <select
             name="sort"
             defaultValue={values.sort}
             className="h-10 w-full rounded-sm border border-input bg-surface px-3 text-sm"
           >
-            <option value="">Default</option>
-            <option value="name">Name</option>
-            <option value="price">Price</option>
+            <option value="">{t.all}</option>
+            <option value="name">{t.sortName}</option>
+            <option value="price">{t.sortPrice}</option>
           </select>
         </label>
         <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">Order</span>
+          <span className="mb-1 block text-muted-foreground">{t.sortOrderLabel}</span>
           <select
             name="order"
             defaultValue={values.order}
             className="h-10 w-full rounded-sm border border-input bg-surface px-3 text-sm"
           >
-            <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
+            <option value="asc">{t.sortAsc}</option>
+            <option value="desc">{t.sortDesc}</option>
           </select>
         </label>
       </div>

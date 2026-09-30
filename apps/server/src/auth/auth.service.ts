@@ -92,6 +92,8 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
 
+    this.assertNotBlocked(user);
+
     // Soft-gate: unverified customers may sign in; AuthUser.emailVerified prompts UI.
     return this.createSession(user);
   }
@@ -105,6 +107,8 @@ export class AuthService {
       if (user.type !== UserType.CUSTOMER) {
         throw new UnauthorizedException('Google sign-in is only available for customer accounts');
       }
+
+      this.assertNotBlocked(user);
 
       user = await this.prisma.user.update({
         where: { id: user.id },
@@ -402,6 +406,8 @@ export class AuthService {
   }
 
   private async createSession(user: User): Promise<AuthSession> {
+    this.assertNotBlocked(user);
+
     const refreshToken = randomBytes(48).toString('hex');
     const tokenHash = this.hashToken(refreshToken);
     const refreshDays = Number(process.env.JWT_REFRESH_EXPIRES_DAYS ?? 7);
@@ -416,6 +422,14 @@ export class AuthService {
       refreshToken,
       user: this.toAuthUser(user),
     };
+  }
+
+  private assertNotBlocked(user: Pick<User, 'blockedAt'>): void {
+    if (user.blockedAt) {
+      throw new UnauthorizedException(
+        'This account has been blocked. Contact support if you believe this is an error.',
+      );
+    }
   }
 
   private toAuthUser(user: User): AuthUser {

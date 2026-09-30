@@ -25,6 +25,10 @@ import { passwordResetEmail } from './templates/password-reset';
 import { emailVerificationEmail } from './templates/email-verification';
 import { newsletterWelcomeEmail } from './templates/newsletter-welcome';
 import { restockEmail } from './templates/restock';
+import {
+  accountBlockedEmail,
+  accountUnblockedEmail,
+} from './templates/account-status';
 
 @Injectable()
 export class SesMailService {
@@ -79,6 +83,18 @@ export class SesMailService {
     return Boolean(this.client && this.fromEmail);
   }
 
+  private getMailSettings(marketId?: string | null) {
+    const where = marketId ? { marketId } : { id: 'OTHER' };
+    return this.prisma.storeSettings.findUnique({
+      where,
+      select: {
+        mailingEnabled: true,
+        mailLogsEnabled: true,
+        adminStockEmailsEnabled: true,
+      },
+    });
+  }
+
   getStorefrontUrl(): string {
     return this.storefrontUrl;
   }
@@ -88,6 +104,20 @@ export class SesMailService {
       .map((e) => e.trim().toLowerCase())
       .filter(Boolean);
     const templateType = (input.templateType ?? 'RAW') as EmailTemplateType;
+    const mailSettings = await this.getMailSettings(input.marketId);
+
+    if (mailSettings?.mailingEnabled === false) {
+      const result: MailSendResult = { sent: false, skippedReason: 'mailing-disabled' };
+      await this.logSend(result, {
+        to: recipients.length ? recipients : '(none)',
+        subject: input.subject,
+        templateType,
+        userId: input.userId,
+        orderId: input.orderId,
+        marketId: input.marketId,
+      });
+      return result;
+    }
 
     if (!recipients.length) {
       const result: MailSendResult = { sent: false, skippedReason: 'no-recipients' };
@@ -97,6 +127,7 @@ export class SesMailService {
         templateType,
         userId: input.userId,
         orderId: input.orderId,
+        marketId: input.marketId,
       });
       return result;
     }
@@ -112,6 +143,7 @@ export class SesMailService {
         templateType,
         userId: input.userId,
         orderId: input.orderId,
+        marketId: input.marketId,
       });
       return result;
     }
@@ -138,6 +170,7 @@ export class SesMailService {
         templateType,
         userId: input.userId,
         orderId: input.orderId,
+        marketId: input.marketId,
       });
       return result;
     } catch (err) {
@@ -156,6 +189,7 @@ export class SesMailService {
         templateType,
         userId: input.userId,
         orderId: input.orderId,
+        marketId: input.marketId,
       });
       return result;
     }
@@ -214,6 +248,7 @@ export class SesMailService {
       templateType: 'ORDER_CONFIRMATION',
       orderId: ctx.orderId,
       userId: ctx.userId,
+      marketId: ctx.marketId,
     });
   }
 
@@ -225,6 +260,7 @@ export class SesMailService {
       templateType: 'ORDER_SHIPPED',
       orderId: ctx.orderId,
       userId: ctx.userId,
+      marketId: ctx.marketId,
     });
   }
 
@@ -236,6 +272,7 @@ export class SesMailService {
       templateType: 'ORDER_DELIVERED',
       orderId: ctx.orderId,
       userId: ctx.userId,
+      marketId: ctx.marketId,
     });
   }
 
@@ -247,19 +284,34 @@ export class SesMailService {
       templateType: 'ORDER_CANCELLED',
       orderId: ctx.orderId,
       userId: ctx.userId,
+      marketId: ctx.marketId,
     });
   }
 
   async notifyAdminNewOrder(ctx: OrderMailContext): Promise<MailSendResult> {
-    if (!this.adminNotifyEmail) {
+    const recipients = await this.prisma.mailRecipient.findMany({
+      where: {
+        marketId: ctx.marketId,
+        type: 'NEW_ORDER',
+        verifiedAt: { not: null },
+      },
+      select: { email: true },
+    });
+    const to = recipients.length
+      ? recipients.map((recipient) => recipient.email)
+      : this.adminNotifyEmail
+        ? [this.adminNotifyEmail]
+        : [];
+    if (!to.length) {
       return { sent: false, skippedReason: 'admin-notify-not-configured' };
     }
     const tpl = adminOrderNotifyEmail(this.withOrderDefaults(ctx));
     return this.sendRaw({
-      to: this.adminNotifyEmail,
+      to,
       ...tpl,
       templateType: 'ADMIN_ORDER_NOTIFY',
       orderId: ctx.orderId,
+      marketId: ctx.marketId,
     });
   }
 
@@ -269,8 +321,28 @@ export class SesMailService {
     sku: string;
     stock: number;
     threshold: number;
+    marketId?: string | null;
   }): Promise<MailSendResult> {
-    if (!this.adminNotifyEmail) {
+    const settings = await this.getMailSettings(opts.marketId);
+    if (settings?.adminStockEmailsEnabled === false) {
+      return { sent: false, skippedReason: 'stock-email-notifications-disabled' };
+    }
+    const recipients = opts.marketId
+      ? await this.prisma.mailRecipient.findMany({
+          where: {
+            marketId: opts.marketId,
+            type: 'STOCK_ALERT',
+            verifiedAt: { not: null },
+          },
+          select: { email: true },
+        })
+      : [];
+    const to = recipients.length
+      ? recipients.map((recipient) => recipient.email)
+      : this.adminNotifyEmail
+        ? [this.adminNotifyEmail]
+        : [];
+    if (!to.length) {
       return { sent: false, skippedReason: 'admin-notify-not-configured' };
     }
     const tpl = adminLowStockEmail({
@@ -278,9 +350,10 @@ export class SesMailService {
       inventoryUrl: `${this.adminUrl}/catalog/inventory`,
     });
     return this.sendRaw({
-      to: this.adminNotifyEmail,
+      to,
       ...tpl,
       templateType: 'ADMIN_LOW_STOCK',
+      marketId: opts.marketId,
     });
   }
 
@@ -320,6 +393,42 @@ export class SesMailService {
     });
   }
 
+  async sendAccountBlocked(opts: {
+    to: string;
+    firstName?: string | null;
+    userId?: string | null;
+    supportEmail?: string | null;
+  }): Promise<MailSendResult> {
+    const tpl = accountBlockedEmail({
+      firstName: opts.firstName,
+      storefrontUrl: this.storefrontUrl,
+      supportEmail: opts.supportEmail ?? this.adminNotifyEmail,
+    });
+    return this.sendRaw({
+      to: opts.to,
+      ...tpl,
+      templateType: 'ACCOUNT_BLOCKED',
+      userId: opts.userId,
+    });
+  }
+
+  async sendAccountUnblocked(opts: {
+    to: string;
+    firstName?: string | null;
+    userId?: string | null;
+  }): Promise<MailSendResult> {
+    const tpl = accountUnblockedEmail({
+      firstName: opts.firstName,
+      storefrontUrl: this.storefrontUrl,
+    });
+    return this.sendRaw({
+      to: opts.to,
+      ...tpl,
+      templateType: 'ACCOUNT_UNBLOCKED',
+      userId: opts.userId,
+    });
+  }
+
   private withOrderDefaults(ctx: OrderMailContext): OrderMailContext {
     return {
       ...ctx,
@@ -339,8 +448,11 @@ export class SesMailService {
       templateType: EmailTemplateType | MailTemplateType;
       userId?: string | null;
       orderId?: string | null;
+      marketId?: string | null;
     },
   ): Promise<void> {
+    const mailSettings = await this.getMailSettings(meta.marketId);
+    if (mailSettings?.mailLogsEnabled === false) return;
     const recipients = Array.isArray(meta.to) ? meta.to : [meta.to];
     const status = result.sent
       ? EmailLogStatus.SENT

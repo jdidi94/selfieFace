@@ -16,7 +16,13 @@ import {
   storeGuestOrderToken,
   storePendingPayment,
 } from '@/lib/stripe';
-import type { AddressDto, CheckoutTotalsDto, OrderDto, PaymentOptionsDto } from '@lumea/types';
+import type {
+  AddressDto,
+  CheckoutTotalsDto,
+  LegalDocumentDto,
+  OrderDto,
+  PaymentOptionsDto,
+} from '@lumea/types';
 import { PaymentProvider } from '@lumea/types';
 import { formatMoney, parseApiErrorBody } from '@lumea/utils';
 import { Button, ErrorState, Input, Label, LoadingState, cn } from '@lumea/ui';
@@ -32,6 +38,7 @@ type AddressFieldErrors = {
   city?: string;
   country?: string;
   phone?: string;
+  email?: string;
 };
 
 const CHECKOUT_COUNTRIES = [
@@ -89,11 +96,15 @@ function FieldError({ message }: { message?: string }) {
 
 function validateContactFields(
   t: StorefrontMessages,
-  values: { fullName: string; phone: string },
+  values: { fullName: string; phone: string; email: string },
 ): AddressFieldErrors {
   const errors: AddressFieldErrors = {};
   if (values.fullName.trim().length < 1) errors.fullName = t.enterFullName;
   if (values.phone.trim().length < 6) errors.phone = t.enterValidPhone;
+  const emailTrimmed = values.email.trim();
+  if (emailTrimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrimmed)) {
+    errors.email = t.enterValidEmail;
+  }
   return errors;
 }
 
@@ -164,6 +175,11 @@ export default function CheckoutPage() {
   const [savedAddresses, setSavedAddresses] = useState<AddressDto[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | 'new' | null>(null);
   const [saveAddress, setSaveAddress] = useState(false);
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  const [policyError, setPolicyError] = useState(false);
+  const [policyDocuments, setPolicyDocuments] = useState<
+    Partial<Record<'terms' | 'returns', LegalDocumentDto>>
+  >({});
 
   const showAddressFields =
     isGuest || selectedAddressId === 'new' || savedAddresses.length === 0;
@@ -173,6 +189,29 @@ export default function CheckoutPage() {
     if (country.trim()) codes.add(country.trim().toUpperCase());
     return Array.from(codes);
   }, [country]);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.all(
+      (['terms', 'returns'] as const).map(async (slug) => {
+        const query = new URLSearchParams({ slug, locale, currency });
+        const response = await fetch(`${apiUrl}/content/legal?${query.toString()}`, {
+          cache: 'no-store',
+        });
+        if (!response.ok) return [slug, null] as const;
+        return [slug, (await response.json()) as LegalDocumentDto | null] as const;
+      }),
+    )
+      .then((rows) => {
+        if (active) setPolicyDocuments(Object.fromEntries(rows.filter((row) => row[1])));
+      })
+      .catch(() => {
+        if (active) setPolicyDocuments({});
+      });
+    return () => {
+      active = false;
+    };
+  }, [currency, locale]);
 
   useEffect(() => {
     if (!isGuest && step === 'contact') setStep('address');
@@ -228,6 +267,12 @@ export default function CheckoutPage() {
   }, [currency]);
 
   useEffect(() => {
+    if (isGuest && paymentMethod === 'CARD' && paymentOptions?.cashEnabled) {
+      setPaymentMethod('COD');
+    }
+  }, [isGuest, paymentMethod, paymentOptions?.cashEnabled]);
+
+  useEffect(() => {
     if (authLoading || pendingOrder || paymentMethod !== 'CARD') return;
     if (isGuest && !paymentOptions?.cardEnabled) return;
     const stored = readPendingPayment();
@@ -259,7 +304,8 @@ export default function CheckoutPage() {
     if (!cart?.id || countryCode.length !== 2 || (step !== 'address' && step !== 'delivery')) {
       return;
     }
-    const guestToken = readCookie('lumea_guest_token');
+    const guestToken =
+      readCookie('selfieface_guest_token') ?? readCookie('lumea_guest_token');
     let cancelled = false;
     void fetch(`${apiUrl}/checkout/quote`, {
       method: 'POST',
@@ -346,21 +392,36 @@ export default function CheckoutPage() {
 
   async function placeOrder(method: 'COD' | 'CARD' = paymentMethod) {
     if (!cart) return;
+    if (!acceptedPolicies) {
+      setPolicyError(true);
+      setError(t.checkoutPolicyRequired);
+      return;
+    }
     if (!validateCurrentAddress()) {
       setStep('address');
       return;
     }
     if (isGuest) {
-      const contactErrors = validateContactFields(t, { fullName, phone });
+      const contactErrors = validateContactFields(t, { fullName, phone, email });
       if (Object.keys(contactErrors).length > 0) {
         setFieldErrors(contactErrors);
-        setError(contactErrors.phone ?? contactErrors.fullName ?? t.checkoutFailed);
+        setError(
+          contactErrors.email ??
+            contactErrors.phone ??
+            contactErrors.fullName ??
+            t.checkoutFailed,
+        );
         setStep('contact');
         return;
       }
     }
     if (!shippingMethodId) {
       setError(t.selectShippingMethod);
+      return;
+    }
+    if (method === 'CARD' && isGuest) {
+      setError(t.paymentCardRequiresAuth);
+      router.push('/account/login?next=/checkout');
       return;
     }
     if (method === 'COD' && paymentOptions && !paymentOptions.cashEnabled) {
@@ -374,7 +435,8 @@ export default function CheckoutPage() {
     setPending(true);
     setError(null);
     try {
-      const guestToken = readCookie('lumea_guest_token');
+      const guestToken =
+      readCookie('selfieface_guest_token') ?? readCookie('lumea_guest_token');
       const idempotencyKey = getOrCreateCheckoutIdempotencyKey(cart.id);
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -393,6 +455,7 @@ export default function CheckoutPage() {
         cartId: cart.id,
         currency,
         locale,
+        acceptedPolicies: true,
         paymentMethod: method,
         shippingMethodId,
         idempotencyKey,
@@ -486,6 +549,11 @@ export default function CheckoutPage() {
 
   async function onDeliveryContinue(e: FormEvent) {
     e.preventDefault();
+    if (isGuest && (!paymentOptions?.cashEnabled || paymentMethod !== 'COD')) {
+      setError(t.paymentCardRequiresAuth);
+      router.push('/account/login?next=/checkout');
+      return;
+    }
     const method: 'COD' | 'CARD' =
       paymentMethod === 'COD' && paymentOptions?.cashEnabled
         ? 'COD'
@@ -618,10 +686,12 @@ export default function CheckoutPage() {
             noValidate
             onSubmit={(e) => {
               e.preventDefault();
-              const nextErrors = validateContactFields(t, { fullName, phone });
+              const nextErrors = validateContactFields(t, { fullName, phone, email });
               setFieldErrors(nextErrors);
               if (Object.keys(nextErrors).length > 0) {
-                setError(nextErrors.fullName ?? nextErrors.phone ?? null);
+                setError(
+                  nextErrors.fullName ?? nextErrors.phone ?? nextErrors.email ?? null,
+                );
                 return;
               }
               goNext();
@@ -667,9 +737,14 @@ export default function CheckoutPage() {
                 id="guestEmail"
                 type="email"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setFieldErrors((prev) => ({ ...prev, email: undefined }));
+                }}
+                aria-invalid={Boolean(fieldErrors.email)}
                 autoComplete="email"
               />
+              <FieldError message={fieldErrors.email} />
               <p className="text-xs text-muted-foreground">{t.guestEmailHint}</p>
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
@@ -962,36 +1037,98 @@ export default function CheckoutPage() {
                   </label>
                 ) : null}
                 {paymentOptions?.cardEnabled ? (
-                  <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-surface-muted/40 px-3 py-3">
-                    <input
-                      type="radio"
-                      name="paymentMethod"
-                      value="CARD"
-                      checked={paymentMethod === 'CARD'}
-                      onChange={() => setPaymentMethod('CARD')}
-                      className="mt-1"
-                    />
-                    <span>
-                      <span className="block text-sm font-medium">
-                        {t.paymentCard}
-                        {paymentOptions.cardProvider === PaymentProvider.KONNECT
-                          ? ` (${t.paymentViaKonnect})`
-                          : paymentOptions.cardProvider === PaymentProvider.STRIPE
-                            ? ` (${t.paymentViaStripe})`
-                            : ''}
+                  isGuest ? (
+                    <div className="rounded-md border border-border bg-surface-muted/40 px-3 py-3 text-sm">
+                      <p className="font-medium text-foreground">{t.paymentCard}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t.paymentCardRequiresAuth}
+                      </p>
+                      <Button variant="outline" size="sm" className="mt-3" asChild>
+                        <Link href="/account/login?next=/checkout">{t.signInToPayByCard}</Link>
+                      </Button>
+                    </div>
+                  ) : (
+                    <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-surface-muted/40 px-3 py-3">
+                      <input
+                        type="radio"
+                        name="paymentMethod"
+                        value="CARD"
+                        checked={paymentMethod === 'CARD'}
+                        onChange={() => setPaymentMethod('CARD')}
+                        className="mt-1"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium">
+                          {t.paymentCard}
+                          {paymentOptions.cardProvider === PaymentProvider.KONNECT
+                            ? ` (${t.paymentViaKonnect})`
+                            : paymentOptions.cardProvider === PaymentProvider.STRIPE
+                              ? ` (${t.paymentViaStripe})`
+                              : ''}
+                        </span>
+                        <span className="text-xs text-muted-foreground">{t.paymentCardHint}</span>
                       </span>
-                      <span className="text-xs text-muted-foreground">{t.paymentCardHint}</span>
-                    </span>
-                  </label>
+                    </label>
+                  )
                 ) : null}
                 {!paymentOptions?.cashEnabled && !paymentOptions?.cardEnabled ? (
                   <p className="text-sm text-destructive">{t.paymentNoneAvailable}</p>
                 ) : null}
               </fieldset>
+              <div
+                className={`mt-4 rounded-md border p-3 ${
+                  policyError ? 'border-destructive' : 'border-border'
+                }`}
+              >
+                <label className="flex cursor-pointer items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={acceptedPolicies}
+                    onChange={(event) => {
+                      setAcceptedPolicies(event.target.checked);
+                      if (event.target.checked) {
+                        setPolicyError(false);
+                        setError(null);
+                      }
+                    }}
+                    className="mt-1 size-4 shrink-0 accent-primary"
+                    aria-invalid={policyError}
+                  />
+                  <span>{t.checkoutPolicyAcceptance}</span>
+                </label>
+                <details className="mt-3 border-t border-border pt-2 text-xs">
+                  <summary className="cursor-pointer text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground">
+                    {t.checkoutPolicyDetails}
+                  </summary>
+                  <div className="mt-3 max-h-56 space-y-4 overflow-y-auto pe-2 text-muted-foreground">
+                    {(['terms', 'returns'] as const).map((slug) => {
+                      const document = policyDocuments[slug];
+                      return (
+                        <section key={slug}>
+                          <h3 className="font-medium text-foreground">
+                            {document?.title ?? (slug === 'terms' ? t.footerTerms : t.footerReturns)}
+                          </h3>
+                          <p className="mt-1 whitespace-pre-wrap leading-relaxed">
+                            {document?.content ??
+                              (slug === 'terms'
+                                ? t.checkoutTermsFallback
+                                : t.checkoutReturnsFallback)}
+                          </p>
+                        </section>
+                      );
+                    })}
+                  </div>
+                </details>
+                {policyError ? (
+                  <p className="mt-2 text-xs text-destructive" role="alert">
+                    {t.checkoutPolicyRequired}
+                  </p>
+                ) : null}
+              </div>
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
-            <div className="flex gap-3">
-              <Button type="button" variant="outline" onClick={goBack}>
+            <div className="sticky bottom-0 z-10 -mx-6 flex gap-3 bg-background/95 px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:static md:mx-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
+              <Button type="button" variant="outline" className="h-auto min-h-12 shrink-0 px-5" onClick={goBack}>
                 {t.back}
               </Button>
               <Button
@@ -999,9 +1136,10 @@ export default function CheckoutPage() {
                 disabled={
                   pending ||
                   !shippingMethodId ||
-                  (!paymentOptions?.cashEnabled && !paymentOptions?.cardEnabled)
+                  (!paymentOptions?.cashEnabled && !paymentOptions?.cardEnabled) ||
+                  (isGuest && !paymentOptions?.cashEnabled)
                 }
-                className="flex-1"
+                className="h-auto min-h-12 flex-1 whitespace-normal py-3 leading-tight"
               >
                 {pending
                   ? t.placingOrder

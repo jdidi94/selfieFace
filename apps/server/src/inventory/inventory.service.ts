@@ -232,6 +232,7 @@ export class InventoryService {
       sku: opts.sku,
       stock: opts.nextStock,
       threshold,
+      marketId: opts.marketId,
     });
   }
 

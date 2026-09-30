@@ -19,6 +19,7 @@ import { LoyaltyModule } from './loyalty/loyalty.module';
 import { MerchandisingModule } from './merchandising/merchandising.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { ProductsModule } from './products/products.module';
     MerchandisingModule,
     BehaviorModule,
     LoyaltyModule,
+    SupportModule,
   ],
 })
 export class AppModule {}

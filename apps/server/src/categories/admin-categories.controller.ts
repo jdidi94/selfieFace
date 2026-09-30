@@ -47,4 +47,10 @@ export class AdminCategoriesController {
   remove(@Param('id') id: string) {
     return this.categoriesService.remove(id);
   }
+
+  @Post(':id/copy-to-market')
+  @Permissions('products.update')
+  copyToMarket(@Param('id') id: string, @Body() body: unknown) {
+    return this.categoriesService.copyToMarket(id, body);
+  }
 }

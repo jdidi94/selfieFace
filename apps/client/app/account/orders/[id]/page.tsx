@@ -1,10 +1,17 @@
 'use client';
 
+import { LocaleLink } from '@/components/locale-link';
 import { OrderStatusTimeline } from '@/components/order-status-timeline';
 import { authFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
+import {
+  latestShippedNote,
+  orderStatusLabel,
+  paymentStatusLabel,
+} from '@/lib/order-labels';
+import { formatOrderMoney, orderCurrencyLabel } from '@/lib/order-money';
 import {
   Badge,
   Button,
@@ -20,8 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@lumea/ui';
-import type { OrderDto } from '@lumea/types';
-import { formatMoney } from '@lumea/utils';
+import { PaymentStatus, type OrderDto } from '@lumea/types';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -78,6 +84,15 @@ export default function AccountOrderDetailPage() {
     ((order.status === 'PENDING' || order.status === 'PROCESSING') &&
       order.paymentStatus !== 'CAPTURED');
 
+  const canRequestRefund = order.paymentStatus === PaymentStatus.CAPTURED;
+  const isRefunded = order.paymentStatus === PaymentStatus.REFUNDED;
+  const shippedNote = latestShippedNote(order.timeline);
+  const refundHref = `/contact?topic=REFUND&orderNumber=${encodeURIComponent(order.number)}${
+    order.customerEmail || user.email
+      ? `&email=${encodeURIComponent(order.customerEmail || user.email)}`
+      : ''
+  }`;
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-16">
       <Link href="/account/orders" className="text-sm text-muted-foreground hover:text-foreground">
@@ -86,22 +101,53 @@ export default function AccountOrderDetailPage() {
       <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="font-display text-4xl text-foreground">{order.number}</h1>
-          <div className="mt-2 flex gap-2">
-            <Badge>{order.status}</Badge>
-            <Badge variant="outline">{order.paymentStatus}</Badge>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Badge>{orderStatusLabel(order.status, t)}</Badge>
+            <Badge variant="outline">{paymentStatusLabel(order.paymentStatus, t)}</Badge>
           </div>
         </div>
-        {canCancel && (
-          <div className="max-w-xs space-y-2 text-end">
-            <Button variant="destructive" disabled={cancelling} onClick={() => void cancelOrder()}>
-              {cancelling ? t.cancelling : t.cancelOrder}
-            </Button>
-            <p className="text-xs text-muted-foreground">{t.cancelPolicyHint}</p>
-          </div>
-        )}
+        <div className="max-w-xs space-y-2 text-end">
+          {canCancel && (
+            <details className="text-start">
+              <summary className="cursor-pointer list-none text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground">
+                {t.cancelOrderDisclosure}
+              </summary>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-2 h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                disabled={cancelling}
+                onClick={() => void cancelOrder()}
+              >
+                {cancelling ? t.cancelling : t.cancelOrder}
+              </Button>
+              <p className="mt-1 text-xs text-muted-foreground">{t.cancelPolicyHint}</p>
+            </details>
+          )}
+          {canRequestRefund && !isRefunded ? (
+            <div className="space-y-1">
+              <Button variant="outline" asChild>
+                <LocaleLink href={refundHref}>{t.requestReturnRefund}</LocaleLink>
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {t.returnRefundNote}{' '}
+                <LocaleLink href="/legal/returns" className="underline underline-offset-2">
+                  {t.footerReturns}
+                </LocaleLink>
+              </p>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
+
+      {shippedNote ? (
+        <p className="mt-4 rounded-md border border-border bg-surface-muted/40 px-4 py-3 text-sm">
+          <span className="font-medium">{t.trackingNoteLabel}: </span>
+          {shippedNote}
+        </p>
+      ) : null}
 
       <Card className="mt-8">
         <CardHeader>
@@ -138,7 +184,7 @@ export default function AccountOrderDetailPage() {
                   </TableCell>
                   <TableCell className="text-end">{item.quantity}</TableCell>
                   <TableCell className="text-end">
-                    {formatMoney(item.lineTotal, order.currency)}
+                    {formatOrderMoney(item.lineTotal, order.currency, locale)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -150,13 +196,13 @@ export default function AccountOrderDetailPage() {
       <Card className="mt-6">
         <CardHeader>
           <CardTitle>
-            {t.summary} ({order.currency})
+            {t.summary} ({orderCurrencyLabel(order.currency, locale)})
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-1 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">{t.subtotal}</span>
-            <span>{formatMoney(order.subtotal, order.currency)}</span>
+            <span>{formatOrderMoney(order.subtotal, order.currency, locale)}</span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">{t.shipping}</span>
@@ -164,21 +210,21 @@ export default function AccountOrderDetailPage() {
               {order.shippingMethodName
                 ? `${order.shippingMethodName} · `
                 : ''}
-              {formatMoney(order.shippingAmount, order.currency)}
+              {formatOrderMoney(order.shippingAmount, order.currency, locale)}
             </span>
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">{t.tax}</span>
-            <span>{formatMoney(order.taxAmount, order.currency)}</span>
+            <span>{formatOrderMoney(order.taxAmount, order.currency, locale)}</span>
           </div>
           <div className="flex justify-between border-t border-border pt-2 font-medium">
             <span>{t.total}</span>
-            <span>{formatMoney(order.total, order.currency)}</span>
+            <span>{formatOrderMoney(order.total, order.currency, locale)}</span>
           </div>
           {order.paymentStatus === 'REFUNDED' && order.refundAmount != null && (
             <div className="flex justify-between text-muted-foreground">
               <span>{t.refunded}</span>
-              <span>{formatMoney(order.refundAmount, order.currency)}</span>
+              <span>{formatOrderMoney(order.refundAmount, order.currency, locale)}</span>
             </div>
           )}
         </CardContent>

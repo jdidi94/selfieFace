@@ -3,6 +3,17 @@
 import { apiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useCurrency } from '@/lib/currency-context';
+import { useLocale } from '@/lib/locale-context';
+import { getMessages } from '@/lib/messages';
+import {
+  CART_COOKIE_MAX_AGE,
+  CART_ID_COOKIE,
+  CART_ID_COOKIE_LEGACY,
+  GUEST_TOKEN_COOKIE,
+  GUEST_TOKEN_COOKIE_LEGACY,
+  readCookieMigrating,
+  writeCookieMigrating,
+} from '@/lib/storefront-cookies';
 import type { CartDto, CartStockAdjustmentDto } from '@lumea/types';
 import {
   createContext,
@@ -10,12 +21,17 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 
-const CART_ID_COOKIE = 'lumea_cart_id';
-const GUEST_TOKEN_COOKIE = 'lumea_guest_token';
+type AddFeedbackStatus = 'adding' | 'added' | 'error';
+
+type AddFeedback = {
+  status: AddFeedbackStatus;
+  message: string;
+};
 
 type CartContextValue = {
   cart: CartDto | null;
@@ -35,38 +51,114 @@ type CartContextValue = {
 
 const CartContext = createContext<CartContextValue | null>(null);
 
-function readCookie(name: string) {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp(`${name}=([^;]+)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
-}
-
-function writeCookie(name: string, value: string) {
-  document.cookie = `${name}=${encodeURIComponent(value)};path=/;max-age=${60 * 60 * 24 * 30};samesite=lax`;
-}
-
 function ensureGuestToken() {
-  let token = readCookie(GUEST_TOKEN_COOKIE);
+  let token = readCookieMigrating(
+    GUEST_TOKEN_COOKIE,
+    GUEST_TOKEN_COOKIE_LEGACY,
+    CART_COOKIE_MAX_AGE,
+  );
   if (!token) {
     token = crypto.randomUUID().replace(/-/g, '');
-    writeCookie(GUEST_TOKEN_COOKIE, token);
+    writeCookieMigrating(
+      GUEST_TOKEN_COOKIE,
+      GUEST_TOKEN_COOKIE_LEGACY,
+      token,
+      CART_COOKIE_MAX_AGE,
+    );
   }
   return token;
+}
+
+function isStockError(message: string): boolean {
+  return /stock|مخزون|stock insuffisant/i.test(message);
+}
+
+function mergeOptimisticQty(cart: CartDto, variantId: string, quantity: number): CartDto | null {
+  const idx = cart.items.findIndex((item) => item.variantId === variantId);
+  if (idx < 0) return null;
+  const item = cart.items[idx]!;
+  const nextQty = item.quantity + quantity;
+  const delta = item.unitPrice * quantity;
+  const items = cart.items.slice();
+  items[idx] = {
+    ...item,
+    quantity: nextQty,
+    lineTotal: item.unitPrice * nextQty,
+  };
+  return {
+    ...cart,
+    items,
+    itemCount: cart.itemCount + quantity,
+    subtotal: cart.subtotal + delta,
+    total: Math.max(0, cart.total + delta),
+  };
+}
+
+function CartAddFeedbackBar({ feedback }: { feedback: AddFeedback | null }) {
+  if (!feedback) return null;
+  const tone =
+    feedback.status === 'error'
+      ? 'border-destructive/40 bg-destructive text-destructive-foreground'
+      : feedback.status === 'added'
+        ? 'border-border bg-foreground text-background'
+        : 'border-border bg-surface text-foreground';
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`pointer-events-none fixed inset-x-0 top-0 z-[70] border-b px-4 py-2 text-center text-sm ${tone}`}
+    >
+      {feedback.message}
+    </div>
+  );
 }
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const { accessToken } = useAuth();
   const { currency } = useCurrency();
+  const { locale } = useLocale();
+  const t = getMessages(locale);
   const [cart, setCart] = useState<CartDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [stockAdjustments, setStockAdjustments] = useState<CartStockAdjustmentDto[]>([]);
+  const [addFeedback, setAddFeedback] = useState<AddFeedback | null>(null);
+  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cartRef = useRef<CartDto | null>(null);
+
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
+
+  const showFeedback = useCallback((next: AddFeedback, autoHideMs?: number) => {
+    if (feedbackTimer.current) {
+      clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = null;
+    }
+    setAddFeedback(next);
+    if (autoHideMs != null) {
+      feedbackTimer.current = setTimeout(() => {
+        setAddFeedback(null);
+        feedbackTimer.current = null;
+      }, autoHideMs);
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+    };
+  }, []);
 
   const cartHeaders = useCallback(() => {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    const cartId = readCookie(CART_ID_COOKIE);
+    const cartId = readCookieMigrating(
+      CART_ID_COOKIE,
+      CART_ID_COOKIE_LEGACY,
+      CART_COOKIE_MAX_AGE,
+    );
     const guestToken = ensureGuestToken();
     if (cartId) headers['x-cart-id'] = cartId;
     headers['x-guest-token'] = guestToken;
@@ -76,7 +168,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const applyCart = useCallback((next: CartDto) => {
     setCart(next);
-    writeCookie(CART_ID_COOKIE, next.id);
+    writeCookieMigrating(CART_ID_COOKIE, CART_ID_COOKIE_LEGACY, next.id, CART_COOKIE_MAX_AGE);
     if (next.stockAdjustments?.length) {
       setStockAdjustments(next.stockAdjustments);
     }
@@ -121,18 +213,41 @@ export function CartProvider({ children }: { children: ReactNode }) {
 
   const addItem = useCallback(
     async (variantId: string, quantity = 1) => {
-      const res = await fetch(`${apiUrl}/cart/items`, {
-        method: 'POST',
-        headers: cartHeaders(),
-        body: JSON.stringify({ variantId, quantity, currency }),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(err.message ?? 'Could not add to bag');
+      const previous = cartRef.current;
+      const optimistic =
+        previous != null ? mergeOptimisticQty(previous, variantId, quantity) : null;
+
+      if (optimistic) {
+        setCart(optimistic);
       }
-      applyCart((await res.json()) as CartDto);
+
+      showFeedback({ status: 'adding', message: t.addingToBag });
+
+      try {
+        const res = await fetch(`${apiUrl}/cart/items`, {
+          method: 'POST',
+          headers: cartHeaders(),
+          body: JSON.stringify({ variantId, quantity, currency }),
+        });
+        if (!res.ok) {
+          const err = (await res.json().catch(() => ({}))) as { message?: string };
+          const message =
+            typeof err.message === 'string' && err.message.trim()
+              ? err.message
+              : t.addToBagError;
+          throw new Error(message);
+        }
+        applyCart((await res.json()) as CartDto);
+        showFeedback({ status: 'added', message: t.addedToBag }, 1800);
+      } catch (e) {
+        setCart(previous);
+        const raw = e instanceof Error ? e.message : t.addToBagError;
+        const message = isStockError(raw) ? t.insufficientStock : raw || t.addToBagError;
+        showFeedback({ status: 'error', message }, 3200);
+        throw new Error(message);
+      }
     },
-    [applyCart, cartHeaders, currency],
+    [applyCart, cartHeaders, currency, showFeedback, t],
   );
 
   const updateItem = useCallback(
@@ -253,7 +368,12 @@ export function CartProvider({ children }: { children: ReactNode }) {
     ],
   );
 
-  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+  return (
+    <CartContext.Provider value={value}>
+      <CartAddFeedbackBar feedback={addFeedback} />
+      {children}
+    </CartContext.Provider>
+  );
 }
 
 export function useCart() {

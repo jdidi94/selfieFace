@@ -76,7 +76,11 @@ export function seoAlternates(
 /** Open Graph / Twitter image entry from a resolved media URL. */
 export function seoImages(imageUrl: string | null | undefined, alt?: string) {
   if (!imageUrl) return undefined;
-  return [{ url: imageUrl, alt: alt || undefined }];
+  const url =
+    imageUrl.startsWith('http://') || imageUrl.startsWith('https://')
+      ? imageUrl
+      : absoluteUrl(imageUrl);
+  return [{ url, alt: alt || undefined }];
 }
 
 export function marketSegmentLabel(market: MarketCode): string {

@@ -1,5 +1,6 @@
 'use client';
 
+import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
 import { BrandPicker } from '@/components/brand-picker';
 import {
@@ -16,6 +17,7 @@ import {
   CURRENCY_BY_MARKET,
   type CatalogBrand,
   type CatalogCategory,
+  type CatalogCopyResult,
   type ProductDetail,
   type PromotionDto,
 } from '@lumea/types';
@@ -89,6 +91,7 @@ export function ProductForm({ productId }: Props) {
   const [kind, setKind] = useState<'PRODUCT' | 'PACK'>('PRODUCT');
   const [packComponents, setPackComponents] = useState<PackComponentSelection[]>([]);
   const [categoryId, setCategoryId] = useState('');
+  const [problemCategoryIds, setProblemCategoryIds] = useState<string[]>([]);
   const [brandId, setBrandId] = useState('');
   const [isIncoming, setIsIncoming] = useState(false);
   const [incomingAt, setIncomingAt] = useState('');
@@ -104,9 +107,15 @@ export function ProductForm({ productId }: Props) {
   const [sku, setSku] = useState('');
   const [price, setPrice] = useState('25.00');
   const [compareAt, setCompareAt] = useState('');
+  const [discountPercentage, setDiscountPercentage] = useState('');
+  const [competitorPrice, setCompetitorPrice] = useState('');
+  const [competitorSource, setCompetitorSource] = useState('');
+  const [competitorCheckedAt, setCompetitorCheckedAt] = useState('');
   const [stock, setStock] = useState('10');
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [galleryIndex, setGalleryIndex] = useState(0);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   function updateCopy(locale: Locale, patch: Partial<LocaleCopy>) {
     setCopy((prev) => ({ ...prev, [locale]: { ...prev[locale], ...patch } }));
@@ -120,7 +129,8 @@ export function ProductForm({ productId }: Props) {
     ]).then(([cats, promos]) => {
       setCategories(cats);
       setPromotions(promos.filter((p) => p.isActive));
-      if (!categoryId && cats[0]) setCategoryId(cats[0].id);
+      const mainCategories = cats.filter((category) => category.kind !== 'PROBLEM');
+      if (!categoryId && mainCategories[0]) setCategoryId(mainCategories[0].id);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap selects once
   }, [accessToken, authLoading]);
@@ -143,6 +153,7 @@ export function ProductForm({ productId }: Props) {
           })),
         );
         setCategoryId(p.category.id);
+        setProblemCategoryIds((p.problemCategories ?? []).map((category) => category.id));
         setBrandId(p.brand.id);
         setInitialBrand({
           id: p.brand.id,
@@ -191,11 +202,23 @@ export function ProductForm({ productId }: Props) {
             setCompareAt(
               row.compareAtAmount != null ? (row.compareAtAmount / 100).toFixed(2) : '',
             );
+            if (row.compareAtAmount != null && row.compareAtAmount > row.amount) {
+              setDiscountPercentage(
+                String(Math.round(((row.compareAtAmount - row.amount) / row.compareAtAmount) * 100)),
+              );
+            } else {
+              setDiscountPercentage('');
+            }
           } else {
             setPrice('25.00');
             setCompareAt('');
           }
         }
+        setCompetitorPrice(
+          p.competitorPriceAmount != null ? (p.competitorPriceAmount / 100).toFixed(2) : '',
+        );
+        setCompetitorSource(p.competitorPriceSource ?? '');
+        setCompetitorCheckedAt(p.competitorPriceCheckedAt?.slice(0, 10) ?? '');
         const gallery = [...p.images]
           .sort((a, b) => a.sortOrder - b.sortOrder)
           .map((img) => ({
@@ -319,9 +342,15 @@ export function ProductForm({ productId }: Props) {
       status,
       kind,
       categoryId,
+      problemCategoryIds,
       brandId,
       isIncoming,
       incomingAt: incomingAt ? new Date(incomingAt).toISOString() : null,
+      competitorPriceAmount: competitorPrice.trim() ? moneyToMinor(competitorPrice) : null,
+      competitorPriceSource: competitorSource.trim() || null,
+      competitorPriceCheckedAt: competitorCheckedAt
+        ? new Date(competitorCheckedAt).toISOString()
+        : null,
       tags: tagsText
         .split(/[,;\n]+/)
         .map((t) => t.trim())
@@ -388,15 +417,33 @@ export function ProductForm({ productId }: Props) {
   if (authLoading || loading) return <LoadingState />;
 
   return (
+    <>
     <div className="mx-auto grid max-w-6xl gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
       <form onSubmit={onSubmit} className="space-y-6">
-        <div>
-          <h1 className="font-display text-3xl">{productId ? 'Edit product' : 'New product'}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Upload many gallery images. The live card on the right mirrors storefront tags and
-            prices before you save.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="font-display text-3xl">{productId ? 'Edit product' : 'New product'}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Upload many gallery images. The live card on the right mirrors storefront tags and
+              prices before you save.
+            </p>
+          </div>
+          {productId ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setCopyMessage(null);
+                setCopyOpen(true);
+              }}
+            >
+              Copy to market…
+            </Button>
+          ) : null}
         </div>
+        {copyMessage ? (
+          <p className="text-sm text-muted-foreground">{copyMessage}</p>
+        ) : null}
 
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-2">
@@ -430,16 +477,49 @@ export function ProductForm({ productId }: Props) {
               id="category"
               className="h-10 w-full rounded-md border border-input bg-surface px-3 text-sm"
               value={categoryId}
-              onChange={(e) => setCategoryId(e.target.value)}
+              onChange={(e) => {
+                setCategoryId(e.target.value);
+                setProblemCategoryIds([]);
+              }}
               required
             >
-              {categories.map((c) => (
+              {categories.filter((c) => c.kind !== 'PROBLEM').map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
               ))}
             </select>
           </div>
+          {categories.some(
+            (category) => category.kind === 'PROBLEM' && category.parentCategoryId === categoryId,
+          ) ? (
+            <fieldset className="space-y-2 sm:col-span-2">
+              <legend className="text-sm font-medium">Shop by concern</legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {categories
+                  .filter(
+                    (category) =>
+                      category.kind === 'PROBLEM' && category.parentCategoryId === categoryId,
+                  )
+                  .map((category) => (
+                    <label key={category.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={problemCategoryIds.includes(category.id)}
+                        onChange={(event) =>
+                          setProblemCategoryIds((current) =>
+                            event.target.checked
+                              ? [...current, category.id]
+                              : current.filter((id) => id !== category.id),
+                          )
+                        }
+                      />
+                      {category.name}
+                    </label>
+                  ))}
+              </div>
+            </fieldset>
+          ) : null}
           <BrandPicker
             accessToken={accessToken}
             value={brandId}
@@ -600,13 +680,76 @@ export function ProductForm({ productId }: Props) {
               <Label>Compare-at ({currency})</Label>
               <Input
                 value={compareAt}
-                onChange={(e) => setCompareAt(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setCompareAt(next);
+                  const current = moneyToMinor(price);
+                  const original = moneyToMinor(next);
+                  setDiscountPercentage(
+                    original > current ? String(Math.round(((original - current) / original) * 100)) : '',
+                  );
+                }}
                 placeholder="Optional"
               />
             </div>
             <div className="space-y-2">
+              <Label>Discount percentage</Label>
+              <Input
+                type="number"
+                min="1"
+                max="99"
+                value={discountPercentage}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setDiscountPercentage(next);
+                  const percentage = Number(next);
+                  const current = Number(price);
+                  if (percentage > 0 && percentage < 100 && current > 0) {
+                    setCompareAt((current / (1 - percentage / 100)).toFixed(2));
+                  }
+                }}
+                placeholder="Optional"
+              />
+              <p className="text-xs text-muted-foreground">
+                Sets the original compare-at price, so shoppers see the saving clearly.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label>Stock</Label>
               <Input value={stock} onChange={(e) => setStock(e.target.value)} required />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border p-4">
+          <p className="text-sm font-medium">Other-store comparison (optional)</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Use a current, comparable public price. It is shown only when it is higher than this product's price.
+          </p>
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div className="space-y-2">
+              <Label>Other-stores price ({currency})</Label>
+              <Input
+                value={competitorPrice}
+                onChange={(e) => setCompetitorPrice(e.target.value)}
+                placeholder="Optional"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Source label</Label>
+              <Input
+                value={competitorSource}
+                onChange={(e) => setCompetitorSource(e.target.value)}
+                placeholder="For example: Local retailers"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Checked on</Label>
+              <Input
+                type="date"
+                value={competitorCheckedAt}
+                onChange={(e) => setCompetitorCheckedAt(e.target.value)}
+              />
             </div>
           </div>
         </div>
@@ -770,5 +913,29 @@ export function ProductForm({ productId }: Props) {
         </div>
       </aside>
     </div>
+
+    <CopyToMarketDialog
+      open={copyOpen}
+      entityName={copy[Locale.EN].name || product?.name || 'product'}
+      entityKind="product"
+      sourceMarket={market}
+      onCancel={() => setCopyOpen(false)}
+      onCopy={async (targetMarket) => {
+        if (!accessToken || !productId) {
+          throw new Error('Not signed in');
+        }
+        return adminFetch<CatalogCopyResult>(
+          `/admin/products/${productId}/copy-to-market`,
+          accessToken,
+          { method: 'POST', body: JSON.stringify({ targetMarket }) },
+        );
+      }}
+      onCopied={(result) => {
+        if (!result.warnings.length) {
+          setCopyMessage(`Copied product to ${result.targetMarket}`);
+        }
+      }}
+    />
+    </>
   );
 }

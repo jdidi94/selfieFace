@@ -45,6 +45,7 @@ export function AccountProfileForm({ labels }: { labels: Labels }) {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [preferredLocale, setPreferredLocale] = useState<string>('none');
+  const [emailNotificationsEnabled, setEmailNotificationsEnabled] = useState(true);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
@@ -56,6 +57,7 @@ export function AccountProfileForm({ labels }: { labels: Labels }) {
       setLastName(data.lastName ?? '');
       setPhone(data.phone ?? '');
       setPreferredLocale(data.preferredLocale ?? 'none');
+      setEmailNotificationsEnabled(data.emailNotificationsEnabled);
     } catch {
       setProfile(null);
     } finally {
@@ -79,6 +81,7 @@ export function AccountProfileForm({ labels }: { labels: Labels }) {
           lastName: lastName.trim() || null,
           phone: phone.trim() || null,
           preferredLocale: preferredLocale === 'none' ? null : preferredLocale,
+          emailNotificationsEnabled,
         }),
       });
       setProfile(updated);
@@ -153,6 +156,15 @@ export function AccountProfileForm({ labels }: { labels: Labels }) {
               Current session: {locale.toUpperCase()}
             </p>
           </div>
+          <label className="flex items-center gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={emailNotificationsEnabled}
+              onChange={(event) => setEmailNotificationsEnabled(event.target.checked)}
+              className="size-4 accent-primary"
+            />
+            {t.profileEmailNotifications}
+          </label>
           <Button type="submit" disabled={saving}>
             {labels.save}
           </Button>

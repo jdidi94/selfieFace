@@ -11,11 +11,12 @@ import { useLocale } from '@/lib/locale-context';
 import { withMarketLocale } from '@/lib/market-path';
 import { getMessages } from '@/lib/messages';
 import { useStorefrontPanels } from '@/lib/storefront-panels';
+import { authPathWithReturn } from '@/lib/auth-return';
 import { MARKET_BY_CURRENCY } from '@lumea/types';
 import { Button } from '@lumea/ui';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Menu, ShoppingBag, X } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 export function StorefrontHeader() {
@@ -27,14 +28,20 @@ export function StorefrontHeader() {
   const { openBag, openFavorites } = useStorefrontPanels();
   const t = getMessages(locale);
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const count = cart?.itemCount ?? 0;
   const [open, setOpen] = useState(false);
+  const currentSearch = searchParams.toString();
+  const currentPath = `${pathname}${currentSearch ? `?${currentSearch}` : ''}`;
+  const signInHref = authPathWithReturn('/account/login', currentPath);
 
   const navLinks = [
     { href: '/shop', label: t.shop },
     { href: '/search', label: t.search },
     { href: '/journal', label: t.journal },
-    ...(!user ? [{ href: '/orders/track', label: t.trackOrderTitle }] : []),
+    { href: '/help', label: t.footerHelp },
+    { href: '/contact', label: t.footerContact },
     { href: '/about', label: t.about },
   ];
 
@@ -104,7 +111,7 @@ export function StorefrontHeader() {
           <ThemeToggle />
           {!loading && (
             <Button variant="ghost" size="sm" className="hidden sm:inline-flex" asChild>
-              <LocaleLink href={user ? '/account' : '/account/login'}>
+              <LocaleLink href={user ? '/account' : signInHref}>
                 {user ? t.account : t.signIn}
               </LocaleLink>
             </Button>
@@ -115,7 +122,7 @@ export function StorefrontHeader() {
             aria-label={t.wishlist}
             onClick={() => {
               if (!user) {
-                router.push(withMarketLocale(market, locale, '/account/login?next=/wishlist'));
+                router.push(withMarketLocale(market, locale, authPathWithReturn('/account/login', currentPath)));
                 return;
               }
               openFavorites();
@@ -176,7 +183,7 @@ export function StorefrontHeader() {
                 ))}
                 {!loading && (
                   <LocaleLink
-                    href={user ? '/account' : '/account/login'}
+                    href={user ? '/account' : signInHref}
                     onClick={() => setOpen(false)}
                     className="rounded-sm px-3 py-3 text-base text-foreground transition-colors hover:bg-surface-muted sm:hidden"
                   >

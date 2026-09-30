@@ -74,7 +74,13 @@ export function WishlistHeartButton({
   return (
     <button
       type="button"
-      aria-label={saved ? t.removeFromWishlist : t.addToWishlist}
+      aria-label={
+        !user
+          ? t.wishlistGuestCta
+          : saved
+            ? t.removeFromWishlist
+            : t.addToWishlist
+      }
       disabled={pending}
       suppressHydrationWarning
       onClick={(e) => void toggle(e)}
@@ -95,9 +101,8 @@ export function WishlistLoginHint() {
   return (
     <p className="text-sm text-muted-foreground">
       <Link href="/account/login?next=/wishlist" className="underline">
-        {t.signIn}
-      </Link>{' '}
-      {t.wishlistSignInHint}
+        {t.wishlistGuestCta}
+      </Link>
     </p>
   );
 }

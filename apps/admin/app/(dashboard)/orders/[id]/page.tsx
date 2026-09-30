@@ -1,9 +1,15 @@
 'use client';
 
+import { ConfirmTypedDialog } from '@/components/confirm-typed-dialog';
 import { FormErrorBanner } from '@/components/form-errors';
 import { adminFetch } from '@/lib/api';
 import { submitErrorState, validateWithSchema } from '@/lib/validate-form';
-import { orderCancelSchema, orderRefundSchema, orderStatusUpdateSchema } from '@lumea/validation';
+import {
+  orderCancelSchema,
+  orderLockSchema,
+  orderRefundSchema,
+  orderStatusUpdateSchema,
+} from '@lumea/validation';
 import { useAuth } from '@/lib/auth-context';
 import {
   Badge,
@@ -50,6 +56,9 @@ export default function OrderDetailPage() {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lockDialogOpen, setLockDialogOpen] = useState(false);
+  const [refundDialogOpen, setRefundDialogOpen] = useState(false);
+  const [refundAmountOverride, setRefundAmountOverride] = useState('');
 
   const load = useCallback(async () => {
     if (!accessToken || !id) return;
@@ -106,23 +115,65 @@ export default function OrderDetailPage() {
     }
   }
 
+  async function toggleLock() {
+    if (!accessToken || !order) return;
+    const locked = !order.lockedAt;
+    setSaving(true);
+    setError(null);
+    try {
+      const validated = validateWithSchema(orderLockSchema, { locked });
+      if (!validated.ok) {
+        setError(validated.message);
+        setSaving(false);
+        return;
+      }
+      const updated = await adminFetch<AdminOrderDto>(
+        `/admin/orders/${order.id}/lock`,
+        accessToken,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(validated.data),
+        },
+      );
+      setOrder(updated);
+      setLockDialogOpen(false);
+    } catch (e) {
+      setError(submitErrorState(e).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function refundOrder() {
     if (!accessToken || !order) return;
-    const confirmed = window.confirm(
-      order.status === OrderStatus.PENDING || order.status === OrderStatus.PROCESSING
-        ? 'Refund this payment via Stripe and cancel the order? Stock will be restored.'
-        : 'Refund this payment via Stripe and restore stock? Order status stays as-is (use for returns).',
-    );
-    if (!confirmed) return;
+    const preview = order.refundPreview;
+    const suggested = preview?.amount ?? order.total;
+    const overrideRaw = refundAmountOverride.trim();
+    const amount = overrideRaw ? Number(overrideRaw) : suggested;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setError('Refund amount must be a positive number (minor units)');
+      return;
+    }
+    if (amount > order.total) {
+      setError('Refund amount cannot exceed order total');
+      return;
+    }
 
     setSaving(true);
     setError(null);
     try {
-      const payload = {
+      const payload: {
+        note: string | null;
+        cancelOrder: boolean;
+        amount?: number;
+      } = {
         note: note.trim() || null,
         cancelOrder:
           order.status === OrderStatus.PENDING || order.status === OrderStatus.PROCESSING,
       };
+      if (overrideRaw) {
+        payload.amount = Math.round(amount);
+      }
       const validated = validateWithSchema(orderRefundSchema, payload);
       if (!validated.ok) {
         setError(validated.message);
@@ -139,18 +190,31 @@ export default function OrderDetailPage() {
       );
       setOrder(updated);
       setNote('');
+      setRefundAmountOverride('');
+      setRefundDialogOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Refund failed');
+      setError(submitErrorState(e).message);
     } finally {
       setSaving(false);
     }
+  }
+
+  function openRefundDialog() {
+    setRefundAmountOverride('');
+    setError(null);
+    setRefundDialogOpen(true);
   }
 
   if (authLoading || loading) return <LoadingState />;
   if (!order) return <p className="text-muted-foreground">Order not found.</p>;
 
   const options = NEXT_STATUSES[order.status] ?? [];
-  const canRefund = order.canRefund ?? order.paymentStatus === PaymentStatus.CAPTURED;
+  const preview = order.refundPreview;
+  const canRefund =
+    order.canRefund ??
+    (order.paymentStatus === PaymentStatus.CAPTURED && !order.stripeRefundId);
+  const isLocked = Boolean(order.lockedAt);
+  const suggestedRefund = preview?.amount ?? order.total;
 
   return (
     <div className="space-y-6">
@@ -163,12 +227,17 @@ export default function OrderDetailPage() {
           <div className="mt-2 flex flex-wrap gap-2">
             <Badge>{order.status}</Badge>
             <Badge variant="outline">{order.paymentStatus}</Badge>
+            {isLocked && <Badge variant="accent">Status locked</Badge>}
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2">
           {options.length > 0 && (
             <>
-              <Select value={nextStatus} onValueChange={setNextStatus}>
+              <Select
+                value={nextStatus}
+                onValueChange={setNextStatus}
+                disabled={isLocked}
+              >
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Update status" />
                 </SelectTrigger>
@@ -180,22 +249,40 @@ export default function OrderDetailPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button disabled={!nextStatus || saving} onClick={() => void applyStatus()}>
+              <Button
+                disabled={!nextStatus || saving || isLocked}
+                onClick={() => void applyStatus()}
+              >
                 {saving ? 'Saving…' : 'Apply'}
               </Button>
             </>
           )}
+          <Button
+            variant="outline"
+            disabled={saving}
+            onClick={() => setLockDialogOpen(true)}
+          >
+            {isLocked ? 'Unlock status' : 'Lock status'}
+          </Button>
           {canRefund && (
             <Button
               variant="destructive"
               disabled={saving}
-              onClick={() => void refundOrder()}
+              onClick={() => openRefundDialog()}
             >
-              {saving ? 'Working…' : 'Refund payment'}
+              Refund payment
             </Button>
           )}
         </div>
       </div>
+
+      {isLocked && (
+        <p className="rounded-md border border-border bg-surface px-4 py-3 text-sm text-muted-foreground">
+          Status changes are disabled while locked
+          {order.lockedAt ? ` (since ${new Date(order.lockedAt).toLocaleString()})` : ''}.
+          Unlock to update or cancel.
+        </p>
+      )}
 
       <div className="max-w-md space-y-2">
         <Label htmlFor="order-note">Note (cancel / refund / status)</Label>
@@ -207,7 +294,141 @@ export default function OrderDetailPage() {
         />
       </div>
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <FormErrorBanner message={error} />}
+
+      <ConfirmTypedDialog
+        open={lockDialogOpen}
+        title={isLocked ? 'Unlock order status' : 'Lock order status'}
+        description={
+          isLocked
+            ? 'Unlocking allows status updates and cancellations again.'
+            : 'While locked, status updates and cancellations are rejected until unlocked.'
+        }
+        confirmLabel={isLocked ? 'UNLOCK' : 'LOCK'}
+        confirmValue={isLocked ? 'UNLOCK' : 'LOCK'}
+        confirmButtonLabel={isLocked ? 'Unlock' : 'Lock'}
+        destructive={!isLocked}
+        onCancel={() => setLockDialogOpen(false)}
+        onConfirm={() => toggleLock()}
+      />
+
+      {refundDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-lg border border-border bg-surface p-5 shadow-lg">
+            <div>
+              <h2 className="font-display text-xl">Confirm refund</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {preview?.preFulfillment !== false &&
+                (order.status === OrderStatus.PENDING ||
+                  order.status === OrderStatus.PROCESSING)
+                  ? 'Pre-fulfillment: full payment will be refunded and the order cancelled.'
+                  : 'Return refund based on this market’s policy. Order status stays as-is; stock is restored.'}
+              </p>
+            </div>
+            <div className="space-y-1 rounded-md border border-border bg-surface-muted/40 p-3 text-sm">
+              {preview ? (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Merchandise</span>
+                    <span>
+                      {formatMoney(preview.breakdown.merchandise, order.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Shipping</span>
+                    <span>
+                      {formatMoney(preview.breakdown.shipping, order.currency)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Tax</span>
+                    <span>{formatMoney(preview.breakdown.tax, order.currency)}</span>
+                  </div>
+                  {preview.breakdown.restockingFee > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Restocking fee</span>
+                      <span>
+                        −{formatMoney(preview.breakdown.restockingFee, order.currency)}
+                      </span>
+                    </div>
+                  )}
+                </>
+              ) : null}
+              <div className="flex justify-between border-t border-border pt-2 font-medium">
+                <span>Suggested refund</span>
+                <span>{formatMoney(suggestedRefund, order.currency)}</span>
+              </div>
+              {preview?.windowExpiresAt && (
+                <p className="pt-1 text-xs text-muted-foreground">
+                  Window expires {new Date(preview.windowExpiresAt).toLocaleString()}
+                </p>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="refund-amount-override">
+                Override amount (minor units, blank = suggested)
+              </Label>
+              <Input
+                id="refund-amount-override"
+                value={refundAmountOverride}
+                onChange={(e) => setRefundAmountOverride(e.target.value)}
+                placeholder={String(suggestedRefund)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving}
+                onClick={() => setRefundDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={saving}
+                onClick={() => void refundOrder()}
+              >
+                {saving ? 'Working…' : 'Confirm refund'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {preview && order.paymentStatus === PaymentStatus.CAPTURED && !order.stripeRefundId && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Refund preview</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            {preview.eligible ? (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Suggested</span>
+                  <span className="font-medium">
+                    {formatMoney(preview.amount, order.currency)}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {preview.preFulfillment
+                    ? 'Full order total (pending/processing).'
+                    : `Merchandise ${(preview.breakdown.partialBps / 100).toFixed(0)}%` +
+                      (preview.breakdown.shipping > 0 ? ' + shipping' : '') +
+                      (preview.breakdown.tax > 0 ? ' + tax' : '') +
+                      (preview.breakdown.restockingFee > 0 ? ' − restocking fee' : '') +
+                      '.'}
+                </p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">
+                {preview.reason ?? 'Refund not allowed under current policy.'}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {(order.refundedAt || order.refundAmount != null) && (
         <Card>

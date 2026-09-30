@@ -100,6 +100,8 @@ export const categoryUpsertSchema = z
     slug: slugSchema.optional(),
     description: z.string().optional().nullable(),
     sortOrder: z.number().int().optional(),
+    kind: z.enum(['CATEGORY', 'PROBLEM']).optional(),
+    parentCategoryId: z.string().min(1).nullable().optional(),
     translations: z.array(categoryTranslationSchema).optional(),
   })
   .superRefine((val, ctx) => {
@@ -112,7 +114,34 @@ export const categoryUpsertSchema = z
       return;
     }
     if (val.translations?.length) requireEnglishTranslation(val.translations, ctx);
+    if (val.kind === 'PROBLEM' && !val.parentCategoryId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Choose a parent category for a problem',
+        path: ['parentCategoryId'],
+      });
+    }
+    if (val.kind === 'CATEGORY' && val.parentCategoryId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Only problem subcategories can have a parent',
+        path: ['parentCategoryId'],
+      });
+    }
   });
+
+export const legalDocumentUpsertSchema = z.object({
+  slug: z.enum(['privacy', 'terms', 'cookies', 'shipping', 'returns']),
+  locale: localeSchema,
+  title: z.string().trim().min(1).max(160),
+  content: z.string().trim().min(1).max(40_000),
+});
+
+export const legalDocumentQuerySchema = z.object({
+  slug: z.enum(['privacy', 'terms', 'cookies', 'shipping', 'returns']),
+  locale: localeSchema.optional().default('en'),
+  currency: currencySchema.optional().default('USD'),
+});
 
 export const brandUpsertSchema = z
   .object({
@@ -177,8 +206,12 @@ export const productFieldsSchema = z.object({
   benefits: z.string().optional().nullable(),
   howToUse: z.string().optional().nullable(),
   suitableFor: z.string().optional().nullable(),
+  competitorPriceAmount: z.number().int().nonnegative().optional().nullable(),
+  competitorPriceSource: z.string().trim().max(120).optional().nullable(),
+  competitorPriceCheckedAt: z.coerce.date().optional().nullable(),
   translations: z.array(productTranslationSchema).optional(),
   categoryId: z.string().min(1),
+  problemCategoryIds: z.array(z.string().min(1)).max(24).optional(),
   brandId: z.string().min(1),
   variants: z.array(variantInputSchema).min(1),
   imageMediaIds: z.array(z.string()).optional(),
@@ -252,6 +285,7 @@ const queryFlagSchema = z
 export const productListQuerySchema = z.object({
   q: z.string().optional(),
   category: z.string().optional(),
+  problemCategory: z.string().optional(),
   brand: z.string().optional(),
   /** Filter catalog by product kind (packs vs standard products). */
   kind: z.enum(['PRODUCT', 'PACK']).optional(),
@@ -376,6 +410,7 @@ export const checkoutCreateSchema = z
   .object({
     cartId: z.string().min(1),
     currency: currencySchema,
+    acceptedPolicies: z.literal(true),
     locale: localeSchema.optional().default('en'),
     shippingAddress: shippingAddressSchema.optional(),
     /** Reuse a saved address book entry (authenticated customers). */
@@ -383,13 +418,13 @@ export const checkoutCreateSchema = z
     shippingMethodId: z.string().min(1),
     /** Required for guest checkout (contact phone). */
     phone: z.string().min(6).max(40).optional(),
-    /** Optional guest email for order confirmation / transactional mail. */
+    /** Optional guest email for order confirmation. */
     email: z
       .union([z.string().email(), z.literal('')])
       .optional()
       .nullable()
       .transform((v) => (v === '' || v == null ? undefined : v.toLowerCase())),
-    /** Guests always COD; authenticated customers may choose CARD or COD. */
+    /** Guests: COD only. CARD requires auth (enforced in service). */
     paymentMethod: z.enum(['CARD', 'COD']).optional(),
     /** Persist shipping address to the customer address book after place-order. */
     saveAddress: z.boolean().optional(),
@@ -427,19 +462,47 @@ export const orderStatusUpdateSchema = z.object({
   note: z.string().max(500).optional().nullable(),
 });
 
+export const orderLockSchema = z.object({
+  locked: z.boolean(),
+});
+
 export const orderCancelSchema = z.object({
   note: z.string().max(500).optional().nullable(),
 });
 
-export const guestOrderTrackSchema = z.object({
-  orderNumber: z.string().trim().min(1).max(64),
-  token: z.string().trim().min(16).max(128),
-});
+/** Guest order lookup: order number + opaque guestAccessToken (preferred). Email kept as legacy fallback. */
+export const guestOrderTrackSchema = z
+  .object({
+    orderNumber: z.string().trim().min(1).max(64),
+    email: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .email()
+      .max(255)
+      .optional(),
+    /** Opaque guestAccessToken from the order (magic-link tracking). */
+    token: z.string().trim().min(16).max(128).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (!data.email && !data.token) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Token or email is required',
+        path: ['token'],
+      });
+    }
+  });
 
 export const orderRefundSchema = z.object({
   note: z.string().max(500).optional().nullable(),
   /** When true (default), also cancel PENDING/PROCESSING orders after refund. */
   cancelOrder: z.boolean().optional().default(true),
+  /**
+   * Optional override in minor units. When omitted, server uses the market refund policy.
+   * Must be a positive integer ≤ order total.
+   */
+  amount: z.number().int().positive().optional(),
 });
 
 export const journalArticleTranslationSchema = z.object({
@@ -539,6 +602,19 @@ export const storeSettingsUpdateSchema = z.object({
   loyaltyMinOrderMinor: z.number().int().nonnegative().max(100_000_000).optional().nullable(),
   loyaltyMaxRedeemBps: z.number().int().positive().max(10_000).optional().nullable(),
   loyaltySignupBonusPoints: z.number().int().nonnegative().max(1_000_000).optional(),
+  refundWindowDays: z.number().int().nonnegative().max(3650).optional(),
+  refundWindowAfterShip: z.boolean().optional(),
+  refundAllowedAfterShipped: z.boolean().optional(),
+  refundAllowedAfterDelivered: z.boolean().optional(),
+  refundShippingRefundable: z.boolean().optional(),
+  refundTaxRefundable: z.boolean().optional(),
+  refundRestockingFeeBps: z.number().int().nonnegative().max(10_000).optional(),
+  refundDefaultPartialBps: z.number().int().positive().max(10_000).optional().nullable(),
+  mailingEnabled: z.boolean().optional(),
+  mailLogsEnabled: z.boolean().optional(),
+  customerOrderEmailsEnabled: z.boolean().optional(),
+  adminOrderEmailsEnabled: z.boolean().optional(),
+  adminStockEmailsEnabled: z.boolean().optional(),
   shippingMethods: z
     .array(
       z.object({
@@ -574,6 +650,7 @@ export type AddressUpdateInput = z.infer<typeof addressUpdateSchema>;
 export type StoreSettingsUpdateInput = z.infer<typeof storeSettingsUpdateSchema>;
 export type OrderAdminListQuery = z.infer<typeof orderAdminListQuerySchema>;
 export type OrderStatusUpdateInput = z.infer<typeof orderStatusUpdateSchema>;
+export type OrderLockInput = z.infer<typeof orderLockSchema>;
 export type OrderCancelInput = z.infer<typeof orderCancelSchema>;
 export type GuestOrderTrackInput = z.infer<typeof guestOrderTrackSchema>;
 export type OrderRefundInput = z.infer<typeof orderRefundSchema>;
@@ -610,10 +687,16 @@ export const customerProfileUpdateSchema = z.object({
   phone: z.string().max(40).optional().nullable(),
   preferredLocale: localeSchema.optional().nullable(),
   preferredCurrency: currencySchema.optional().nullable(),
+  emailNotificationsEnabled: z.boolean().optional(),
 });
 
 export const adminCustomerListQuerySchema = z.object({
   q: z.string().optional(),
+  page: z.coerce.number().int().positive().optional().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).optional().default(25),
+});
+
+export const adminJournalListQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional().default(1),
   pageSize: z.coerce.number().int().positive().max(100).optional().default(25),
 });
@@ -632,6 +715,7 @@ export type ReviewModerationInput = z.infer<typeof reviewModerationSchema>;
 export type AdminReviewListQuery = z.infer<typeof adminReviewListQuerySchema>;
 export type CustomerProfileUpdateInput = z.infer<typeof customerProfileUpdateSchema>;
 export type AdminCustomerListQuery = z.infer<typeof adminCustomerListQuerySchema>;
+export type AdminJournalListQuery = z.infer<typeof adminJournalListQuerySchema>;
 export type AnalyticsQuery = z.infer<typeof analyticsQuerySchema>;
 
 export const couponUpsertSchema = z
@@ -695,7 +779,7 @@ export const homeRailsQuerySchema = z.object({
 });
 
 export const behaviorEventSchema = z.object({
-  type: z.enum(['SEARCH', 'PRODUCT_CLICK']),
+  type: z.enum(['SEARCH', 'PRODUCT_CLICK', 'PAGE_VIEW']),
   productId: z.string().min(1).optional().nullable(),
   query: z.string().max(200).optional().nullable(),
   locale: localeSchema.optional().nullable(),
@@ -703,7 +787,19 @@ export const behaviorEventSchema = z.object({
   currency: currencySchema.optional().nullable(),
   path: z.string().max(500).optional().nullable(),
   sessionId: z.string().max(80).optional().nullable(),
+  userId: z.string().min(1).max(64).optional().nullable(),
   occurredAt: z.string().datetime().optional().nullable(),
+});
+
+export const behaviorStatsQuerySchema = z.object({
+  days: z.coerce
+    .number()
+    .int()
+    .refine((d) => d === 7 || d === 30 || d === 90, { message: 'days must be 7, 30, or 90' })
+    .optional()
+    .default(30),
+  topLimit: z.coerce.number().int().positive().max(50).optional().default(10),
+  recentLimit: z.coerce.number().int().positive().max(100).optional().default(25),
 });
 
 export const behaviorBatchSchema = z.object({
@@ -816,6 +912,11 @@ export const newsletterUnsubscribeSchema = z.object({
   token: z.string().min(16).max(128),
 });
 
+export const mailRecipientUpsertSchema = z.object({
+  email: z.string().trim().toLowerCase().email().max(255),
+  type: z.enum(['NEW_ORDER', 'STOCK_ALERT']),
+});
+
 export const emailLogAdminListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).optional().default(50),
@@ -836,6 +937,7 @@ export type CouponUpsertInput = z.infer<typeof couponUpsertSchema>;
 export type WishlistAddInput = z.infer<typeof wishlistAddSchema>;
 export type HomeRailsQuery = z.infer<typeof homeRailsQuerySchema>;
 export type BehaviorBatchInput = z.infer<typeof behaviorBatchSchema>;
+export type BehaviorStatsQuery = z.infer<typeof behaviorStatsQuerySchema>;
 export type MerchandisingRailReplaceInput = z.infer<typeof merchandisingRailReplaceSchema>;
 export type PromotionUpsertInput = z.infer<typeof promotionUpsertSchema>;
 export type StockNotifySubscribeInput = z.infer<typeof stockNotifySubscribeSchema>;
@@ -845,5 +947,76 @@ export type NewsletterSubscribeInput = z.infer<typeof newsletterSubscribeSchema>
 export type NewsletterUnsubscribeInput = z.infer<typeof newsletterUnsubscribeSchema>;
 export type EmailLogAdminListQuery = z.infer<typeof emailLogAdminListQuerySchema>;
 export type NewsletterAdminListQuery = z.infer<typeof newsletterAdminListQuerySchema>;
+
+/** Body for POST /admin/{products|categories|brands|coupons}/:id/copy-to-market */
+export const copyToMarketSchema = z.object({
+  targetMarket: marketCodeSchema,
+});
+
+export type CopyToMarketInput = z.infer<typeof copyToMarketSchema>;
+
+export const faqItemTranslationSchema = z.object({
+  locale: localeSchema,
+  question: z.string().min(1).max(500),
+  answer: z.string().min(1).max(10_000),
+});
+
+export const faqItemUpsertSchema = z
+  .object({
+    category: z.string().max(80).optional().nullable(),
+    sortOrder: z.number().int().optional(),
+    published: z.boolean().optional(),
+    translations: z.array(faqItemTranslationSchema).min(1),
+  })
+  .superRefine((val, ctx) => {
+    requireEnglishTranslation(val.translations, ctx);
+  });
+
+export const faqListQuerySchema = z.object({
+  locale: localeSchema.optional().default('en'),
+  currency: currencySchema.optional().default('USD'),
+  market: marketCodeSchema.optional(),
+});
+
+export const supportTicketTopicSchema = z.enum(['REFUND', 'WEBSITE', 'ORDER', 'OTHER']);
+export const supportTicketStatusSchema = z.enum(['OPEN', 'IN_PROGRESS', 'CLOSED']);
+
+export const supportTicketCreateSchema = z.object({
+  topic: supportTicketTopicSchema,
+  subject: z.string().min(1).max(200),
+  message: z.string().min(10).max(5000),
+  name: z.string().max(120).optional().nullable(),
+  email: z.string().email(),
+  locale: localeSchema.optional().default('en'),
+  market: marketCodeSchema.optional(),
+  currency: currencySchema.optional(),
+  orderNumber: z.string().max(40).optional().nullable(),
+  mediaIds: z.array(z.string().min(1)).max(5).optional(),
+});
+
+export const supportTicketLookupSchema = z.object({
+  id: z.string().min(1),
+  email: z.string().email(),
+});
+
+export const supportTicketAdminUpdateSchema = z.object({
+  status: supportTicketStatusSchema.optional(),
+  adminNotes: z.string().max(5000).optional().nullable(),
+});
+
+export const adminSupportTicketListQuerySchema = z.object({
+  status: supportTicketStatusSchema.optional(),
+  topic: supportTicketTopicSchema.optional(),
+  q: z.string().optional(),
+  page: z.coerce.number().int().positive().optional().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).optional().default(25),
+});
+
+export type FaqItemUpsertInput = z.infer<typeof faqItemUpsertSchema>;
+export type FaqListQuery = z.infer<typeof faqListQuerySchema>;
+export type SupportTicketCreateInput = z.infer<typeof supportTicketCreateSchema>;
+export type SupportTicketLookupInput = z.infer<typeof supportTicketLookupSchema>;
+export type SupportTicketAdminUpdateInput = z.infer<typeof supportTicketAdminUpdateSchema>;
+export type AdminSupportTicketListQuery = z.infer<typeof adminSupportTicketListQuerySchema>;
 
 export { z };

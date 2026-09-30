@@ -1,11 +1,24 @@
 'use client';
 
 import { BehaviorEventType, Currency, Locale } from '@lumea/types';
+import { useAuth } from '@/lib/auth-context';
+import { hasAnalyticsConsent } from '@/lib/cookie-consent';
+import {
+  BEHAVIOR_BATCH_KEY,
+  BEHAVIOR_BATCH_KEY_LEGACY,
+  BEHAVIOR_SESSION_KEY,
+  BEHAVIOR_SESSION_KEY_LEGACY,
+  COOKIE_CONSENT_EVENT,
+  CURRENCY_COOKIE,
+  CURRENCY_COOKIE_LEGACY,
+  PREFERENCE_COOKIE_MAX_AGE,
+  readCookieMigrating,
+  readStorageMigrating,
+  writeStorageMigrating,
+} from '@/lib/storefront-cookies';
+import { usePathname } from 'next/navigation';
 import { useEffect, useRef } from 'react';
 
-const STORAGE_KEY = 'lumea_behavior_batch';
-const SESSION_KEY = 'lumea_behavior_session';
-const CURRENCY_COOKIE = 'lumea_currency';
 const MAX_BATCH = 80;
 /** Same-origin BFF avoids CORS issues with sendBeacon. */
 const BATCH_URL = '/api/behavior/batch';
@@ -18,13 +31,15 @@ type QueuedEvent = {
   currency?: Currency | null;
   path?: string | null;
   sessionId?: string | null;
+  userId?: string | null;
   occurredAt?: string | null;
 };
 
-function readCookie(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp(`${name}=([^;]+)`));
-  return match?.[1] ?? null;
+/** Module-level so track* helpers can attach userId without prop drilling. */
+let currentUserId: string | null = null;
+
+export function setBehaviorUserId(userId: string | null) {
+  currentUserId = userId;
 }
 
 function parseCurrency(value: string | null | undefined): Currency {
@@ -34,13 +49,19 @@ function parseCurrency(value: string | null | undefined): Currency {
 }
 
 function visitorCurrency(): Currency {
-  return parseCurrency(readCookie(CURRENCY_COOKIE));
+  return parseCurrency(
+    readCookieMigrating(CURRENCY_COOKIE, CURRENCY_COOKIE_LEGACY, PREFERENCE_COOKIE_MAX_AGE),
+  );
 }
 
 function readQueue(): QueuedEvent[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = readStorageMigrating(
+      sessionStorage,
+      BEHAVIOR_BATCH_KEY,
+      BEHAVIOR_BATCH_KEY_LEGACY,
+    );
     if (!raw) return [];
     const parsed = JSON.parse(raw) as QueuedEvent[];
     return Array.isArray(parsed) ? parsed : [];
@@ -51,26 +72,42 @@ function readQueue(): QueuedEvent[] {
 
 function writeQueue(events: QueuedEvent[]) {
   if (typeof window === 'undefined') return;
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(events.slice(-MAX_BATCH)));
+  writeStorageMigrating(
+    sessionStorage,
+    BEHAVIOR_BATCH_KEY,
+    BEHAVIOR_BATCH_KEY_LEGACY,
+    JSON.stringify(events.slice(-MAX_BATCH)),
+  );
 }
 
 function sessionId(): string {
   if (typeof window === 'undefined') return '';
-  let id = sessionStorage.getItem(SESSION_KEY);
+  let id = readStorageMigrating(
+    sessionStorage,
+    BEHAVIOR_SESSION_KEY,
+    BEHAVIOR_SESSION_KEY_LEGACY,
+  );
   if (!id) {
     id = `s_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
-    sessionStorage.setItem(SESSION_KEY, id);
+    writeStorageMigrating(
+      sessionStorage,
+      BEHAVIOR_SESSION_KEY,
+      BEHAVIOR_SESSION_KEY_LEGACY,
+      id,
+    );
   }
   return id;
 }
 
 function enqueue(event: QueuedEvent) {
+  if (!hasAnalyticsConsent()) return;
   const next = [
     ...readQueue(),
     {
       ...event,
       currency: event.currency ?? visitorCurrency(),
       sessionId: event.sessionId ?? sessionId(),
+      userId: event.userId ?? currentUserId,
     },
   ];
   writeQueue(next);
@@ -100,8 +137,25 @@ export function trackSearch(query: string, locale?: Locale, path?: string) {
   });
 }
 
+export function trackPageView(path?: string, locale?: Locale) {
+  const resolvedPath =
+    path ?? (typeof window !== 'undefined' ? window.location.pathname : null);
+  if (!resolvedPath) return;
+  enqueue({
+    type: BehaviorEventType.PAGE_VIEW,
+    locale: locale ?? null,
+    currency: visitorCurrency(),
+    path: resolvedPath.slice(0, 500),
+    occurredAt: new Date().toISOString(),
+  });
+}
+
 export function flushBehaviorBatch() {
   if (typeof window === 'undefined') return;
+  if (!hasAnalyticsConsent()) {
+    writeQueue([]);
+    return;
+  }
   const events = readQueue();
   if (!events.length) return;
 
@@ -132,8 +186,37 @@ export function flushBehaviorBatch() {
 }
 
 export function BehaviorCollector({ locale }: { locale: Locale }) {
+  const { user } = useAuth();
+  const pathname = usePathname();
   const localeRef = useRef(locale);
   localeRef.current = locale;
+  const lastPathRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setBehaviorUserId(user?.id ?? null);
+  }, [user?.id]);
+
+  useEffect(() => {
+    const onConsent = () => {
+      if (!hasAnalyticsConsent()) {
+        writeQueue([]);
+        return;
+      }
+      if (pathname) {
+        lastPathRef.current = null;
+        trackPageView(pathname, localeRef.current);
+      }
+    };
+    window.addEventListener(COOKIE_CONSENT_EVENT, onConsent);
+    return () => window.removeEventListener(COOKIE_CONSENT_EVENT, onConsent);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!hasAnalyticsConsent()) return;
+    if (!pathname || pathname === lastPathRef.current) return;
+    lastPathRef.current = pathname;
+    trackPageView(pathname, localeRef.current);
+  }, [pathname]);
 
   useEffect(() => {
     const onHide = () => {

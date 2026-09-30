@@ -9,6 +9,7 @@ const ALL_PERMISSIONS: Permission[] = [
   'orders.read',
   'orders.update',
   'customers.read',
+  'customers.update',
   'inventory.read',
   'inventory.update',
   'content.read',
@@ -19,6 +20,8 @@ const ALL_PERMISSIONS: Permission[] = [
   'coupons.create',
   'coupons.update',
   'coupons.delete',
+  'tickets.read',
+  'tickets.update',
 ];
 
 export const ROLE_PERMISSIONS: Record<AdminRole, Permission[]> = {
@@ -31,12 +34,15 @@ export const ROLE_PERMISSIONS: Record<AdminRole, Permission[]> = {
     'orders.read',
     'orders.update',
     'customers.read',
+    'customers.update',
     'inventory.read',
     'inventory.update',
     'analytics.read',
     'coupons.read',
     'coupons.create',
     'coupons.update',
+    'tickets.read',
+    'tickets.update',
   ],
   [AdminRole.EDITOR]: ['content.read', 'content.create', 'content.update', 'products.read'],
 };

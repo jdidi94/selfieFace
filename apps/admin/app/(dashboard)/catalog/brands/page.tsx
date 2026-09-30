@@ -1,12 +1,17 @@
 'use client';
 
+import {
+  ConfirmTypedDialog,
+  typedConfirmToken,
+} from '@/components/confirm-typed-dialog';
+import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
 import { adminFetch, mediaUrl, publicApiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminMarket } from '@/lib/market-context';
 import { submitErrorState, validateWithSchema } from '@/lib/validate-form';
 import { brandUpsertSchema } from '@lumea/validation';
-import { Locale, type CatalogBrand } from '@lumea/types';
+import { Locale, type CatalogBrand, type CatalogCopyResult } from '@lumea/types';
 import {
   Button,
   Dialog,
@@ -62,6 +67,9 @@ export default function BrandsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [pendingDelete, setPendingDelete] = useState<CatalogBrand | null>(null);
+  const [pendingCopy, setPendingCopy] = useState<CatalogBrand | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   async function load() {
     if (!accessToken) return;
@@ -300,7 +308,21 @@ export default function BrandsPage() {
                   <Button variant="outline" size="sm" onClick={() => openEdit(item)}>
                     Edit
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={() => void remove(item.id)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setCopyMessage(null);
+                      setPendingCopy(item);
+                    }}
+                  >
+                    Copy to market…
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setPendingDelete(item)}
+                  >
                     Delete
                   </Button>
                 </TableCell>
@@ -309,6 +331,52 @@ export default function BrandsPage() {
           </TableBody>
         </Table>
       </div>
+
+      {copyMessage ? (
+        <p className="text-sm text-muted-foreground">{copyMessage}</p>
+      ) : null}
+
+      <ConfirmTypedDialog
+        open={!!pendingDelete}
+        title="Delete brand"
+        description={
+          pendingDelete
+            ? `This permanently deletes “${pendingDelete.name}”. Linked products may be affected.`
+            : ''
+        }
+        confirmLabel={typedConfirmToken(pendingDelete?.name, 'DELETE')}
+        confirmValue={typedConfirmToken(pendingDelete?.name, 'DELETE')}
+        confirmButtonLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          await remove(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
+
+      <CopyToMarketDialog
+        open={!!pendingCopy}
+        entityName={pendingCopy?.name ?? ''}
+        entityKind="brand"
+        sourceMarket={market}
+        onCancel={() => setPendingCopy(null)}
+        onCopy={async (targetMarket) => {
+          if (!accessToken || !pendingCopy) {
+            throw new Error('Not signed in');
+          }
+          return adminFetch<CatalogCopyResult>(
+            `/admin/brands/${pendingCopy.id}/copy-to-market`,
+            accessToken,
+            { method: 'POST', body: JSON.stringify({ targetMarket }) },
+          );
+        }}
+        onCopied={(result) => {
+          if (!result.warnings.length) {
+            setCopyMessage(`Copied brand to ${result.targetMarket}`);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -6,8 +6,14 @@ import { apiUrl } from '@/lib/api';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
 import {
+  latestShippedNote,
+  orderStatusLabel,
+  paymentStatusLabel,
+} from '@/lib/order-labels';
+import { formatOrderMoney, orderCurrencyLabel } from '@/lib/order-money';
+import {
   orderAuthHeaders,
-  readGuestOrderTokenByNumber,
+  removeGuestOrderToken,
   storeGuestOrderToken,
 } from '@/lib/stripe';
 import {
@@ -17,8 +23,6 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
-  Input,
-  Label,
   LoadingState,
   Table,
   TableBody,
@@ -27,49 +31,42 @@ import {
   TableHeader,
   TableRow,
 } from '@lumea/ui';
-import type { OrderDto } from '@lumea/types';
-import { formatMoney } from '@lumea/utils';
+import { PaymentStatus, type OrderDto } from '@lumea/types';
 import { useSearchParams } from 'next/navigation';
-import { FormEvent, Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 
 function TrackInner() {
   const searchParams = useSearchParams();
   const { locale } = useLocale();
   const t = getMessages(locale);
 
-  const [orderNumber, setOrderNumber] = useState(searchParams.get('number') ?? '');
-  const [token, setToken] = useState(searchParams.get('token') ?? '');
   const [order, setOrder] = useState<OrderDto | null>(null);
   const [loading, setLoading] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [numberCopied, setNumberCopied] = useState(false);
-  const [bothCopied, setBothCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  const numberParam = (searchParams.get('number') ?? '').trim();
+  const tokenParam = (searchParams.get('token') ?? '').trim();
+  const emailParam = (searchParams.get('email') ?? '').trim();
+  const hasMagicLink = Boolean(numberParam && tokenParam);
+  const hasLegacyEmailLink = Boolean(numberParam && emailParam && !tokenParam);
+  const hasDeepLink = hasMagicLink || hasLegacyEmailLink;
 
   useEffect(() => {
-    const num = searchParams.get('number') ?? '';
-    const tok = searchParams.get('token') ?? '';
-    if (num) setOrderNumber(num);
-    if (tok) {
-      setToken(tok);
-    } else if (num) {
-      const saved = readGuestOrderTokenByNumber(num);
-      if (saved) setToken(saved);
+    if (hasMagicLink) {
+      void lookup({ orderNumber: numberParam, token: tokenParam });
+    } else if (hasLegacyEmailLink) {
+      void lookup({ orderNumber: numberParam, email: emailParam });
     }
-  }, [searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- deep-link once per query
+  }, [numberParam, tokenParam, emailParam, hasMagicLink, hasLegacyEmailLink]);
 
-  useEffect(() => {
-    const num = (searchParams.get('number') ?? '').trim();
-    const tok =
-      (searchParams.get('token') ?? '').trim() ||
-      (num ? readGuestOrderTokenByNumber(num) : null);
-    if (!num || !tok) return;
-    void lookup(num, tok);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- initial deep-link only
-  }, []);
-
-  async function lookup(numberValue: string, tokenValue: string) {
+  async function lookup(body: {
+    orderNumber: string;
+    token?: string;
+    email?: string;
+  }) {
     setLoading(true);
     setError(null);
     setOrder(null);
@@ -77,10 +74,7 @@ function TrackInner() {
       const res = await fetch(`${apiUrl}/orders/track`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          orderNumber: numberValue.trim(),
-          token: tokenValue.trim(),
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { message?: string };
@@ -98,15 +92,6 @@ function TrackInner() {
     }
   }
 
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!orderNumber.trim() || !token.trim()) {
-      setError(t.trackOrderMissingFields);
-      return;
-    }
-    void lookup(orderNumber, token);
-  }
-
   async function cancelOrder() {
     if (!order?.guestAccessToken) return;
     if (!window.confirm(t.cancelConfirm)) return;
@@ -122,7 +107,16 @@ function TrackInner() {
         const err = (await res.json().catch(() => ({}))) as { message?: string };
         throw new Error(err.message ?? t.cancelFailed);
       }
-      setOrder((await res.json()) as OrderDto);
+      const updated = (await res.json()) as OrderDto;
+      setOrder(updated);
+      removeGuestOrderToken(updated.id, updated.number);
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(
+          window.history.state,
+          '',
+          `${window.location.pathname}?number=${encodeURIComponent(updated.number)}`,
+        );
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t.cancelFailed);
     } finally {
@@ -130,56 +124,24 @@ function TrackInner() {
     }
   }
 
-  async function copyToken() {
-    if (!token.trim()) return;
+  function trackAbsoluteUrl() {
+    if (!order?.number || !order.guestAccessToken || typeof window === 'undefined') {
+      return '';
+    }
+    const qs = `number=${encodeURIComponent(order.number)}&token=${encodeURIComponent(order.guestAccessToken)}`;
+    return `${window.location.origin}${window.location.pathname}?${qs}`;
+  }
+
+  async function copyTrackLink() {
+    const url = trackAbsoluteUrl();
+    if (!url) return;
     try {
-      await navigator.clipboard.writeText(token.trim());
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
     } catch {
       // ignore
     }
-  }
-
-  async function copyOrderNumber() {
-    if (!orderNumber.trim()) return;
-    try {
-      await navigator.clipboard.writeText(orderNumber.trim());
-      setNumberCopied(true);
-      window.setTimeout(() => setNumberCopied(false), 2000);
-    } catch {
-      // ignore
-    }
-  }
-
-  async function copyBoth() {
-    if (!orderNumber.trim() || !token.trim()) return;
-    try {
-      await navigator.clipboard.writeText(
-        `${t.trackOrderNumber}: ${orderNumber.trim()}\n${t.trackOrderToken}: ${token.trim()}`,
-      );
-      setBothCopied(true);
-      window.setTimeout(() => setBothCopied(false), 2000);
-    } catch {
-      // ignore
-    }
-  }
-
-  function downloadTrackingDetails() {
-    if (!orderNumber.trim() || !token.trim()) return;
-    const body = [
-      'Selfieface order tracking',
-      '',
-      `${t.trackOrderNumber}: ${orderNumber.trim()}`,
-      `${t.trackOrderToken}: ${token.trim()}`,
-    ].join('\n');
-    const blob = new Blob([body], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `selfieface-order-${orderNumber.trim()}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   const canCancel =
@@ -188,65 +150,36 @@ function TrackInner() {
       (order.status === 'PENDING' || order.status === 'PROCESSING') &&
       order.paymentStatus !== 'CAPTURED');
 
+  const canRequestRefund =
+    !!order && order.paymentStatus === PaymentStatus.CAPTURED;
+  const shippedNote = order ? latestShippedNote(order.timeline) : null;
+  const refundHref = order
+    ? `/contact?topic=REFUND&orderNumber=${encodeURIComponent(order.number)}${
+        order.customerEmail
+          ? `&email=${encodeURIComponent(order.customerEmail)}`
+          : ''
+      }`
+    : '/contact';
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-16">
       <h1 className="font-display text-4xl text-foreground">{t.trackOrderTitle}</h1>
       <p className="mt-3 max-w-xl text-sm text-muted-foreground">{t.trackOrderSubtitle}</p>
+      <p className="mt-3 text-sm text-muted-foreground">
+        {t.trackOrderAccountHint}{' '}
+        <LocaleLink
+          href="/account/orders"
+          className="font-medium text-foreground underline-offset-4 hover:underline"
+        >
+          {t.trackOrderAccountCta}
+        </LocaleLink>
+      </p>
 
-      <form onSubmit={onSubmit} className="mt-8 space-y-4 rounded-lg border border-border bg-surface p-6">
-        <div className="space-y-2">
-          <Label htmlFor="order-number">{t.trackOrderNumber}</Label>
-          <div className="flex gap-2">
-            <Input
-              id="order-number"
-              value={orderNumber}
-              onChange={(e) => setOrderNumber(e.target.value)}
-              placeholder="LM-…"
-              autoComplete="off"
-            />
-            <Button type="button" variant="outline" onClick={() => void copyOrderNumber()}>
-              {numberCopied ? t.trackingDetailsCopied : t.copyOrderNumber}
-            </Button>
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="order-token">{t.trackOrderToken}</Label>
-          <div className="flex gap-2">
-            <Input
-              id="order-token"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={t.trackOrderTokenPlaceholder}
-              autoComplete="off"
-              className="font-mono text-sm"
-            />
-            <Button type="button" variant="outline" onClick={() => void copyToken()}>
-              {copied ? t.trackingDetailsCopied : t.copyAccessToken}
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" disabled={loading}>
-            {loading ? t.loadingOrder : t.trackOrderLookup}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!orderNumber.trim() || !token.trim()}
-            onClick={() => void copyBoth()}
-          >
-            {bothCopied ? t.trackingDetailsCopied : t.copyTrackingBoth}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!orderNumber.trim() || !token.trim()}
-            onClick={downloadTrackingDetails}
-          >
-            {t.downloadTrackingDetails}
-          </Button>
-        </div>
-      </form>
+      {!hasDeepLink && !order ? (
+        <p className="mt-8 rounded-lg border border-border bg-surface p-6 text-sm text-muted-foreground">
+          {t.trackOrderNeedLink}
+        </p>
+      ) : null}
 
       {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
       {loading && !order ? <LoadingState className="mt-8" label={t.loadingOrder} /> : null}
@@ -256,24 +189,63 @@ function TrackInner() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className="font-display text-3xl text-foreground">{order.number}</h2>
-              <div className="mt-2 flex gap-2">
-                <Badge>{order.status}</Badge>
-                <Badge variant="outline">{order.paymentStatus}</Badge>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Badge>{orderStatusLabel(order.status, t)}</Badge>
+                <Badge variant="outline">{paymentStatusLabel(order.paymentStatus, t)}</Badge>
               </div>
+              {order.guestAccessToken ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void copyTrackLink()}
+                  >
+                    {linkCopied ? t.trackLinkCopied : t.copyTrackLink}
+                  </Button>
+                </div>
+              ) : null}
             </div>
-            {canCancel ? (
-              <div className="max-w-xs space-y-2 text-end">
-                <Button
-                  variant="destructive"
-                  disabled={cancelling}
-                  onClick={() => void cancelOrder()}
-                >
-                  {cancelling ? t.cancelling : t.cancelOrder}
-                </Button>
-                <p className="text-xs text-muted-foreground">{t.cancelPolicyHint}</p>
-              </div>
-            ) : null}
+            <div className="max-w-xs space-y-2 text-end">
+              {canCancel ? (
+                <details className="text-start">
+                  <summary className="cursor-pointer list-none text-xs text-muted-foreground underline decoration-border underline-offset-4 hover:text-foreground">
+                    {t.cancelOrderDisclosure}
+                  </summary>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                    disabled={cancelling}
+                    onClick={() => void cancelOrder()}
+                  >
+                    {cancelling ? t.cancelling : t.cancelOrder}
+                  </Button>
+                  <p className="mt-1 text-xs text-muted-foreground">{t.cancelPolicyHint}</p>
+                </details>
+              ) : null}
+              {canRequestRefund ? (
+                <div className="space-y-1">
+                  <Button variant="outline" asChild>
+                    <LocaleLink href={refundHref}>{t.requestReturnRefund}</LocaleLink>
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    {t.returnRefundNote}{' '}
+                    <LocaleLink href="/legal/returns" className="underline underline-offset-2">
+                      {t.footerReturns}
+                    </LocaleLink>
+                  </p>
+                </div>
+              ) : null}
+            </div>
           </div>
+
+          {shippedNote ? (
+            <p className="rounded-md border border-border bg-surface-muted/40 px-4 py-3 text-sm">
+              <span className="font-medium">{t.trackingNoteLabel}: </span>
+              {shippedNote}
+            </p>
+          ) : null}
 
           <Card>
             <CardHeader>
@@ -312,7 +284,7 @@ function TrackInner() {
                       </TableCell>
                       <TableCell className="text-end">{item.quantity}</TableCell>
                       <TableCell className="text-end">
-                        {formatMoney(item.lineTotal, order.currency)}
+                        {formatOrderMoney(item.lineTotal, order.currency, locale)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -324,21 +296,21 @@ function TrackInner() {
           <Card>
             <CardHeader>
               <CardTitle>
-                {t.summary} ({order.currency})
+                {t.summary} ({orderCurrencyLabel(order.currency, locale)})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-1 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t.subtotal}</span>
-                <span>{formatMoney(order.subtotal, order.currency)}</span>
+                <span>{formatOrderMoney(order.subtotal, order.currency, locale)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t.shipping}</span>
-                <span>{formatMoney(order.shippingAmount, order.currency)}</span>
+                <span>{formatOrderMoney(order.shippingAmount, order.currency, locale)}</span>
               </div>
               <div className="flex justify-between border-t border-border pt-2 font-medium">
                 <span>{t.total}</span>
-                <span>{formatMoney(order.total, order.currency)}</span>
+                <span>{formatOrderMoney(order.total, order.currency, locale)}</span>
               </div>
             </CardContent>
           </Card>

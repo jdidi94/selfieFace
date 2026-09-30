@@ -1,11 +1,12 @@
 'use client';
 
+import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
 import { FormErrorBanner } from '@/components/form-errors';
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminMarket } from '@/lib/market-context';
 import { submitErrorState, validateWithSchema } from '@/lib/validate-form';
-import type { ProductListResponse } from '@lumea/types';
+import type { CatalogCopyResult, ProductListItem, ProductListResponse } from '@lumea/types';
 import { productBulkTagsSchema } from '@lumea/validation';
 import {
   Badge,
@@ -59,6 +60,8 @@ export default function AdminProductsPage() {
   const [tagInput, setTagInput] = useState('');
   const [bulkPending, setBulkPending] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
+  const [pendingCopy, setPendingCopy] = useState<ProductListItem | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
@@ -249,6 +252,9 @@ export default function AdminProductsPage() {
       ) : null}
 
       <FormErrorBanner message={error} />
+      {copyMessage ? (
+        <p className="text-sm text-muted-foreground">{copyMessage}</p>
+      ) : null}
 
       {loading ? (
         <LoadingState label="Loading products…" />
@@ -313,9 +319,19 @@ export default function AdminProductsPage() {
                     <TableCell>
                       {item.currency} {(item.priceFrom / 100).toFixed(2)}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="space-x-2 text-right">
                       <Button variant="ghost" size="sm" asChild>
                         <Link href={`/catalog/products/${item.id}`}>Edit</Link>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setCopyMessage(null);
+                          setPendingCopy(item);
+                        }}
+                      >
+                        Copy to market…
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -326,6 +342,29 @@ export default function AdminProductsPage() {
           <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
         </>
       )}
+
+      <CopyToMarketDialog
+        open={!!pendingCopy}
+        entityName={pendingCopy?.name ?? ''}
+        entityKind="product"
+        sourceMarket={market}
+        onCancel={() => setPendingCopy(null)}
+        onCopy={async (targetMarket) => {
+          if (!accessToken || !pendingCopy) {
+            throw new Error('Not signed in');
+          }
+          return adminFetch<CatalogCopyResult>(
+            `/admin/products/${pendingCopy.id}/copy-to-market`,
+            accessToken,
+            { method: 'POST', body: JSON.stringify({ targetMarket }) },
+          );
+        }}
+        onCopied={(result) => {
+          if (!result.warnings.length) {
+            setCopyMessage(`Copied product to ${result.targetMarket}`);
+          }
+        }}
+      />
     </div>
   );
 }

@@ -2,11 +2,13 @@
 
 import { Button, Input, Label, cn } from '@lumea/ui';
 import { GoogleSignInButton } from '@/components/google-sign-in-button';
+import { PasswordField } from '@/components/password-field';
 import { bannerCtaPrimaryClassName } from '@/lib/brand-cta';
+import { authPathWithReturn, getSafeAuthReturnPath } from '@/lib/auth-return';
+import { LocaleLink } from '@/components/locale-link';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 
 type AuthFormProps = {
@@ -21,24 +23,35 @@ type AuthFormProps = {
 
 export function AuthForm({ mode, onSubmit }: AuthFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { locale } = useLocale();
   const t = getMessages(locale);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const returnPath = getSafeAuthReturnPath(searchParams.get('next'));
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     setPending(true);
     const form = new FormData(e.currentTarget);
+    const password = String(form.get('password') ?? '');
+    if (mode === 'register') {
+      const confirm = String(form.get('confirmPassword') ?? '');
+      if (password !== confirm) {
+        setError(t.passwordMismatch);
+        setPending(false);
+        return;
+      }
+    }
     try {
       await onSubmit({
         email: String(form.get('email') ?? ''),
-        password: String(form.get('password') ?? ''),
+        password,
         firstName: String(form.get('firstName') ?? '') || undefined,
         lastName: String(form.get('lastName') ?? '') || undefined,
       });
-      router.push('/');
+      router.replace(returnPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : t.somethingWentWrong);
     } finally {
@@ -64,17 +77,28 @@ export function AuthForm({ mode, onSubmit }: AuthFormProps) {
         <Label htmlFor="email">{t.email}</Label>
         <Input id="email" name="email" type="email" required autoComplete="email" />
       </div>
-      <div className="space-y-2">
-        <Label htmlFor="password">{t.password}</Label>
-        <Input
-          id="password"
-          name="password"
-          type="password"
+      <PasswordField
+        id="password"
+        name="password"
+        label={t.password}
+        showLabel={t.showPassword}
+        hideLabel={t.hidePassword}
+        required
+        minLength={8}
+        autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+      />
+      {mode === 'register' && (
+        <PasswordField
+          id="confirmPassword"
+          name="confirmPassword"
+          label={t.confirmPassword}
+          showLabel={t.showPassword}
+          hideLabel={t.hidePassword}
           required
           minLength={8}
-          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+          autoComplete="new-password"
         />
-      </div>
+      )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" className={cn('w-full', bannerCtaPrimaryClassName)} disabled={pending}>
         {pending ? t.pleaseWait : mode === 'login' ? t.signIn : t.createAccount}
@@ -83,21 +107,27 @@ export function AuthForm({ mode, onSubmit }: AuthFormProps) {
         <span className="bg-background relative z-10 px-2">{t.or}</span>
         <span className="absolute inset-x-0 top-1/2 border-t border-border" />
       </div>
-      <GoogleSignInButton />
+      <GoogleSignInButton returnPath={returnPath} />
       <p className="text-center text-sm text-muted-foreground">
         {mode === 'login' ? (
           <>
             {t.newToLumea}{' '}
-            <Link href="/account/register" className="text-foreground underline">
+            <LocaleLink
+              href={authPathWithReturn('/account/register', returnPath)}
+              className="text-foreground underline"
+            >
               {t.register}
-            </Link>
+            </LocaleLink>
           </>
         ) : (
           <>
             {t.alreadyHaveAccount}{' '}
-            <Link href="/account/login" className="text-foreground underline">
+            <LocaleLink
+              href={authPathWithReturn('/account/login', returnPath)}
+              className="text-foreground underline"
+            >
               {t.signIn}
-            </Link>
+            </LocaleLink>
           </>
         )}
       </p>

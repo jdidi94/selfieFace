@@ -4,8 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Locale } from '@prisma/client';
-import { Locale as SharedLocale, MarketCode } from '@lumea/types';
+import {
+  Locale as SharedLocale,
+  MarketCode,
+  type CatalogCopyResult,
+} from '@lumea/types';
 import { brandUpsertSchema, localeSchema } from '@lumea/validation';
+import { resolveCopyTarget } from '../catalog/catalog-copy.util';
 import {
   CACHE_PREFIX,
   CatalogCacheService,
@@ -193,6 +198,55 @@ export class BrandsService {
     await this.prisma.brand.delete({ where: { id } });
     await this.catalogCache.invalidateCatalog(existing.market.code);
     return { success: true };
+  }
+
+  async copyToMarket(id: string, input: unknown): Promise<CatalogCopyResult> {
+    const existing = await this.prisma.brand.findUnique({
+      where: { id },
+      include: { translations: true, market: true },
+    });
+    if (!existing) throw new NotFoundException('Brand not found');
+
+    const { target, sourceCode, targetCode } = await resolveCopyTarget(
+      this.marketsService,
+      input,
+      existing.market.code,
+    );
+
+    const clash = await this.prisma.brand.findUnique({
+      where: { marketId_slug: { marketId: target.id, slug: existing.slug } },
+    });
+    if (clash) {
+      throw new BadRequestException(
+        `Brand slug "${existing.slug}" already exists in ${targetCode}`,
+      );
+    }
+
+    const created = await this.prisma.brand.create({
+      data: {
+        name: existing.name,
+        slug: existing.slug,
+        description: existing.description,
+        imageUrl: existing.imageUrl,
+        marketId: target.id,
+        translations: {
+          create: existing.translations.map((t) => ({
+            locale: t.locale,
+            name: t.name,
+            description: t.description,
+          })),
+        },
+      },
+    });
+
+    await this.catalogCache.invalidateCatalog(targetCode);
+    return {
+      id: created.id,
+      type: 'brand',
+      sourceMarket: sourceCode,
+      targetMarket: targetCode,
+      warnings: [],
+    };
   }
 
   private isUniqueViolation(err: unknown) {

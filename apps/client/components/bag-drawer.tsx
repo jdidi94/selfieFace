@@ -48,6 +48,7 @@ export function BagDrawer() {
   const [loyaltyPoints, setLoyaltyPoints] = useState('');
   const [loyaltyPending, setLoyaltyPending] = useState(false);
   const [loyaltyError, setLoyaltyError] = useState<string | null>(null);
+  const [pendingItemId, setPendingItemId] = useState<string | null>(null);
   const open = panel === 'bag';
 
   async function onApplyCoupon(e: FormEvent) {
@@ -84,6 +85,28 @@ export function BagDrawer() {
       setLoyaltyError(err instanceof Error ? err.message : t.loyaltyError);
     } finally {
       setLoyaltyPending(false);
+    }
+  }
+
+  async function changeItem(itemId: string, quantity: number) {
+    setPendingItemId(itemId);
+    try {
+      await updateItem(itemId, quantity);
+    } catch {
+      // Cart context exposes the error state in this drawer.
+    } finally {
+      setPendingItemId(null);
+    }
+  }
+
+  async function deleteItem(itemId: string) {
+    setPendingItemId(itemId);
+    try {
+      await removeItem(itemId);
+    } catch {
+      // Cart context exposes the error state in this drawer.
+    } finally {
+      setPendingItemId(null);
     }
   }
 
@@ -157,18 +180,19 @@ export function BagDrawer() {
                         value={item.quantity}
                         min={1}
                         max={Math.max(1, item.stock)}
-                        onChange={(qty) => void updateItem(item.id, qty)}
+                        onChange={(qty) => void changeItem(item.id, qty)}
                         decreaseLabel={t.decreaseQty}
                         increaseLabel={t.increaseQty}
-                        disabled={item.stock <= 0}
+                        disabled={item.stock <= 0 || pendingItemId === item.id}
                       />
                       <Button
                         variant="ghost"
                         size="sm"
                         className="text-muted-foreground"
-                        onClick={() => void removeItem(item.id)}
+                        disabled={pendingItemId === item.id}
+                        onClick={() => void deleteItem(item.id)}
                       >
-                        {t.remove}
+                        {pendingItemId === item.id ? t.loading : t.remove}
                       </Button>
                     </div>
                   </div>
@@ -261,13 +285,13 @@ export function BagDrawer() {
                 <span>{formatMoney(cart.total, cart.currency)}</span>
               </div>
             </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Button variant="outline" className="flex-1" asChild>
+            <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+              <Button variant="outline" className="h-auto min-h-12 flex-1 whitespace-normal py-3 leading-tight" asChild>
                 <LocaleLink href="/cart" onClick={closePanel}>
                   {t.viewFullBag}
                 </LocaleLink>
               </Button>
-              <Button variant="accent" className="flex-1" asChild>
+              <Button variant="accent" className="h-auto min-h-12 flex-1 whitespace-normal py-3 leading-tight" asChild>
                 <LocaleLink href="/checkout" onClick={closePanel}>
                   {t.checkout}
                 </LocaleLink>

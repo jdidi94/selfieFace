@@ -43,6 +43,8 @@ const TEMPLATE_OPTIONS = [
   { value: 'ORDER_CANCELLED', label: 'Order cancelled' },
   { value: 'EMAIL_VERIFICATION', label: 'Email verification' },
   { value: 'PASSWORD_RESET', label: 'Password reset' },
+  { value: 'ACCOUNT_BLOCKED', label: 'Account blocked' },
+  { value: 'ACCOUNT_UNBLOCKED', label: 'Account unblocked' },
   { value: 'RESTOCK', label: 'Restock' },
   { value: 'ADMIN_ORDER_NOTIFY', label: 'Admin order notify' },
   { value: 'ADMIN_LOW_STOCK', label: 'Admin low stock' },

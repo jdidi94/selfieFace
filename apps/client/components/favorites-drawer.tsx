@@ -1,7 +1,9 @@
 'use client';
 
+import { LocaleLink } from '@/components/locale-link';
 import { apiUrl, mediaUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useCart } from '@/lib/cart-context';
 import { useCurrency } from '@/lib/currency-context';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
@@ -20,15 +22,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@lumea/ui';
-import { LocaleLink } from '@/components/locale-link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 export function FavoritesDrawer() {
-  const { panel, closePanel, openFavorites } = useStorefrontPanels();
+  const { panel, closePanel, openFavorites, openBag } = useStorefrontPanels();
   const { user, accessToken, loading: authLoading } = useAuth();
   const { currency } = useCurrency();
   const { locale } = useLocale();
+  const { addItem } = useCart();
   const t = getMessages(locale);
   const router = useRouter();
   const [items, setItems] = useState<WishlistItemDto[]>([]);
@@ -73,6 +75,14 @@ export function FavoritesDrawer() {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     await load();
+  }
+
+  function addToBag(item: WishlistItemDto) {
+    if (!item.defaultVariantId || !item.inStock) return;
+    openBag();
+    void addItem(item.defaultVariantId, 1).catch(() => {
+      // Feedback bar handles error messaging.
+    });
   }
 
   return (
@@ -125,14 +135,21 @@ export function FavoritesDrawer() {
                       {item.productName}
                     </LocaleLink>
                     <p className="text-sm">{formatMoney(item.priceFrom, item.currency)}</p>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground"
-                      onClick={() => void remove(item.productId)}
-                    >
-                      {t.removeFromWishlist}
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      {item.defaultVariantId && item.inStock ? (
+                        <Button size="sm" onClick={() => addToBag(item)}>
+                          {t.addToBag}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground"
+                        onClick={() => void remove(item.productId)}
+                      >
+                        {t.removeFromWishlist}
+                      </Button>
+                    </div>
                   </div>
                 </li>
               ))}

@@ -1,6 +1,7 @@
 'use client';
 
-import { Button, Input, Label, cn } from '@lumea/ui';
+import { Button, cn } from '@lumea/ui';
+import { PasswordField } from '@/components/password-field';
 import { bannerCtaPrimaryClassName } from '@/lib/brand-cta';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
@@ -21,7 +22,14 @@ function ResetPasswordForm() {
     e.preventDefault();
     setError(null);
     setPending(true);
-    const password = String(new FormData(e.currentTarget).get('password') ?? '');
+    const form = new FormData(e.currentTarget);
+    const password = String(form.get('password') ?? '');
+    const confirm = String(form.get('confirmPassword') ?? '');
+    if (password !== confirm) {
+      setError(t.passwordMismatch);
+      setPending(false);
+      return;
+    }
     try {
       const res = await fetch('/api/auth/reset-password', {
         method: 'POST',
@@ -44,10 +52,26 @@ function ResetPasswordForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="password">{t.newPassword}</Label>
-        <Input id="password" name="password" type="password" minLength={8} required />
-      </div>
+      <PasswordField
+        id="password"
+        name="password"
+        label={t.newPassword}
+        showLabel={t.showPassword}
+        hideLabel={t.hidePassword}
+        minLength={8}
+        required
+        autoComplete="new-password"
+      />
+      <PasswordField
+        id="confirmPassword"
+        name="confirmPassword"
+        label={t.confirmPassword}
+        showLabel={t.showPassword}
+        hideLabel={t.hidePassword}
+        minLength={8}
+        required
+        autoComplete="new-password"
+      />
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" disabled={pending} className={cn('w-full', bannerCtaPrimaryClassName)}>
         {t.updatePassword}

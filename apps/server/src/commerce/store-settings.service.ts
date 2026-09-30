@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Currency, ShippingZone, type ShippingMethod, type StoreSettings } from '@prisma/client';
 import {
   Currency as SharedCurrency,
@@ -20,9 +25,12 @@ import {
 } from '../markets/market.util';
 import { MarketsService } from '../markets/markets.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { openSettingsSecret, sealSettingsSecret } from './settings-secrets.util';
 
 @Injectable()
 export class StoreSettingsService {
+  private readonly logger = new Logger(StoreSettingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly marketsService: MarketsService,
@@ -100,14 +108,13 @@ export class StoreSettingsService {
       ...settingsData
     } = parsed.data;
 
-    const existing = await this.get(code);
     const secretPatch: Partial<StoreSettings> = {};
 
     if (stripeSecretKey !== undefined) {
       if (stripeSecretKey === null || stripeSecretKey === '') {
         // keep existing when blank
       } else {
-        secretPatch.stripeSecretKey = stripeSecretKey;
+        secretPatch.stripeSecretKey = this.sealOrThrow(stripeSecretKey);
       }
     }
     if (stripePublishableKey !== undefined) {
@@ -121,17 +128,14 @@ export class StoreSettingsService {
       if (konnectApiKey === null || konnectApiKey === '') {
         // keep
       } else {
-        secretPatch.konnectApiKey = konnectApiKey;
+        secretPatch.konnectApiKey = this.sealOrThrow(konnectApiKey);
       }
     }
     if (konnectWalletId !== undefined) {
-      secretPatch.konnectWalletId =
-        konnectWalletId === null || konnectWalletId === ''
-          ? existing.konnectWalletId
-          : konnectWalletId;
-      if (konnectWalletId === '') {
+      if (konnectWalletId === null || konnectWalletId === '') {
         // keep existing
-        delete secretPatch.konnectWalletId;
+      } else {
+        secretPatch.konnectWalletId = this.sealOrThrow(konnectWalletId);
       }
     }
 
@@ -178,7 +182,11 @@ export class StoreSettingsService {
   }
 
   resolveStripeSecret(settings: StoreSettings): string | null {
-    return settings.stripeSecretKey?.trim() || process.env.STRIPE_SECRET_KEY?.trim() || null;
+    return (
+      this.openStoredSecret(settings.stripeSecretKey, 'stripeSecretKey') ||
+      process.env.STRIPE_SECRET_KEY?.trim() ||
+      null
+    );
   }
 
   resolveStripePublishable(settings: StoreSettings): string | null {
@@ -191,11 +199,44 @@ export class StoreSettingsService {
   }
 
   resolveKonnectApiKey(settings: StoreSettings): string | null {
-    return settings.konnectApiKey?.trim() || process.env.KONNECT_API_KEY?.trim() || null;
+    return (
+      this.openStoredSecret(settings.konnectApiKey, 'konnectApiKey') ||
+      process.env.KONNECT_API_KEY?.trim() ||
+      null
+    );
   }
 
   resolveKonnectWalletId(settings: StoreSettings): string | null {
-    return settings.konnectWalletId?.trim() || process.env.KONNECT_WALLET_ID?.trim() || null;
+    return (
+      this.openStoredSecret(settings.konnectWalletId, 'konnectWalletId') ||
+      process.env.KONNECT_WALLET_ID?.trim() ||
+      null
+    );
+  }
+
+  private sealOrThrow(plaintext: string): string {
+    try {
+      const sealed = sealSettingsSecret(plaintext);
+      if (!sealed) throw new BadRequestException('Secret value cannot be empty');
+      return sealed;
+    } catch (err) {
+      if (err instanceof BadRequestException) throw err;
+      const message = err instanceof Error ? err.message : 'Failed to encrypt payment secret';
+      throw new BadRequestException(message);
+    }
+  }
+
+  private openStoredSecret(
+    stored: string | null | undefined,
+    field: string,
+  ): string | null {
+    const opened = openSettingsSecret(stored);
+    if (stored?.trim() && opened == null) {
+      this.logger.warn(
+        `Could not decrypt StoreSettings.${field}; set SETTINGS_SECRETS_KEY (or PAYMENT_SECRETS_ENCRYPTION_KEY)`,
+      );
+    }
+    return opened;
   }
 
   stripeConfigured(settings: StoreSettings): boolean {
@@ -432,7 +473,9 @@ export class StoreSettingsService {
       stripePublishableKey: this.resolveStripePublishable(s),
       konnectEnabled: s.konnectEnabled,
       konnectApiKeySet: Boolean(this.resolveKonnectApiKey(s)),
-      konnectWalletId: s.konnectWalletId,
+      /** Never echo wallet id; use empty-means-unchanged on write. */
+      konnectWalletId: null,
+      konnectWalletIdSet: Boolean(this.resolveKonnectWalletId(s)),
       konnectSandbox: s.konnectSandbox,
       contactWhatsapp: s.contactWhatsapp,
       contactFacebook: s.contactFacebook,
@@ -446,6 +489,19 @@ export class StoreSettingsService {
       loyaltyMinOrderMinor: s.loyaltyMinOrderMinor,
       loyaltyMaxRedeemBps: s.loyaltyMaxRedeemBps,
       loyaltySignupBonusPoints: s.loyaltySignupBonusPoints,
+      refundWindowDays: s.refundWindowDays,
+      refundWindowAfterShip: s.refundWindowAfterShip,
+      refundAllowedAfterShipped: s.refundAllowedAfterShipped,
+      refundAllowedAfterDelivered: s.refundAllowedAfterDelivered,
+      refundShippingRefundable: s.refundShippingRefundable,
+      refundTaxRefundable: s.refundTaxRefundable,
+      refundRestockingFeeBps: s.refundRestockingFeeBps,
+      refundDefaultPartialBps: s.refundDefaultPartialBps,
+      mailingEnabled: s.mailingEnabled,
+      mailLogsEnabled: s.mailLogsEnabled,
+      customerOrderEmailsEnabled: s.customerOrderEmailsEnabled,
+      adminOrderEmailsEnabled: s.adminOrderEmailsEnabled,
+      adminStockEmailsEnabled: s.adminStockEmailsEnabled,
       shippingMethods: methods.map((m): ShippingMethodDto => ({
         id: m.id,
         code: m.code,

@@ -26,6 +26,8 @@ export function ProductVariantPicker({
   currency,
   initialVariantId,
   lowStockThreshold = 5,
+  competitorPriceAmount,
+  competitorPriceSource,
 }: {
   productId: string;
   variants: ProductVariantDto[];
@@ -33,6 +35,8 @@ export function ProductVariantPicker({
   initialVariantId?: string;
   /** From store settings — show “limited stock” at or below this qty. */
   lowStockThreshold?: number;
+  competitorPriceAmount?: number | null;
+  competitorPriceSource?: string | null;
 }) {
   const { addItem } = useCart();
   const { openBag } = useStorefrontPanels();
@@ -41,7 +45,6 @@ export function ProductVariantPicker({
   const active = useMemo(() => variants.filter((v) => v.isActive), [variants]);
   const [selectedId, setSelectedId] = useState(initialVariantId ?? active[0]?.id ?? '');
   const [qty, setQty] = useState(1);
-  const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const selected = active.find((v) => v.id === selectedId) ?? active[0];
 
@@ -51,25 +54,33 @@ export function ProductVariantPicker({
 
   const inStock = selected.stock > 0;
   const stockLabel = stockStatusLabel(selected.stock, lowStockThreshold, t);
+  const competitorSaving =
+    competitorPriceAmount != null && competitorPriceAmount > selected.price
+      ? competitorPriceAmount - selected.price
+      : null;
+  const competitorSavingPercent =
+    competitorSaving != null
+      ? Math.round((competitorSaving / competitorPriceAmount!) * 100)
+      : null;
+  const [adding, setAdding] = useState(false);
 
   async function onAdd() {
     if (!selected || selected.stock <= 0) return;
-    setPending(true);
     setMessage(null);
+    setAdding(true);
     try {
       await addItem(selected.id, qty);
-      setMessage(t.addedToBag);
       openBag();
     } catch (err) {
       setMessage(
-        err instanceof Error && err.message.includes('stock')
+        err instanceof Error && /stock|مخزون|stock insuffisant/i.test(err.message)
           ? t.insufficientStock
           : err instanceof Error
             ? err.message
             : t.addToBagError,
       );
     } finally {
-      setPending(false);
+      setAdding(false);
     }
   }
 
@@ -81,6 +92,17 @@ export function ProductVariantPicker({
         currency={currency}
         className="text-xl"
       />
+      {competitorSaving != null && competitorSavingPercent != null ? (
+        <aside className="rounded-md border border-primary/25 bg-primary/5 p-3 text-sm">
+          <p className="font-medium text-foreground">
+            {t.comparisonOtherPrice}: {formatMoney(competitorPriceAmount!, currency as Currency)}
+          </p>
+          <p className="mt-1 text-muted-foreground">
+            {t.comparisonSave(formatMoney(competitorSaving, currency as Currency), competitorSavingPercent)}
+            {competitorPriceSource ? ` · ${competitorPriceSource}` : ''}
+          </p>
+        </aside>
+      ) : null}
       <div>
         <p className="mb-2 text-sm text-muted-foreground">{t.size}</p>
         <div className="flex flex-wrap gap-2">
@@ -116,15 +138,15 @@ export function ProductVariantPicker({
           onChange={setQty}
           decreaseLabel={t.decreaseQty}
           increaseLabel={t.increaseQty}
-          disabled={pending || !inStock}
+          disabled={!inStock}
         />
         <Button
           variant="accent"
           className="min-w-[10rem] rounded-sm"
-          disabled={pending || !inStock}
+          disabled={!inStock || adding}
           onClick={() => void onAdd()}
         >
-          {pending ? t.addingToBag : inStock ? t.addToBag : t.outOfStock}
+          {adding ? t.addingToBag : inStock ? t.addToBag : t.outOfStock}
         </Button>
       </div>
       {!inStock && (
@@ -135,7 +157,7 @@ export function ProductVariantPicker({
       {message && <p className="text-sm text-muted-foreground">{message}</p>}
 
       {/* Sticky mobile CTA */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur md:hidden">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">
@@ -154,11 +176,11 @@ export function ProductVariantPicker({
           {inStock ? (
             <Button
               variant="accent"
-              className="shrink-0 rounded-sm px-5"
-              disabled={pending}
+              className="min-h-12 shrink-0 rounded-sm px-5"
+              disabled={adding}
               onClick={() => void onAdd()}
             >
-              {pending ? t.addingToBag : t.addToBag}
+              {adding ? t.addingToBag : t.addToBag}
             </Button>
           ) : (
             <span className="shrink-0 text-sm text-muted-foreground">{t.outOfStock}</span>
@@ -171,7 +193,7 @@ export function ProductVariantPicker({
         )}
       </div>
       {/* Spacer so sticky bar doesn't cover content */}
-      <div className={inStock ? 'h-20 md:hidden' : 'h-40 md:hidden'} aria-hidden />
+      <div className={inStock ? 'h-24 md:hidden' : 'h-44 md:hidden'} aria-hidden />
     </div>
   );
 }

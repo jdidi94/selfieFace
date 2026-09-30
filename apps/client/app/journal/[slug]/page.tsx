@@ -13,6 +13,12 @@ import { notFound } from 'next/navigation';
 
 export const revalidate = 300;
 
+export async function generateStaticParams() {
+  const { fetchAllJournalSlugs } = await import('@/lib/static-slugs');
+  const slugs = await fetchAllJournalSlugs();
+  return slugs.map((slug) => ({ slug }));
+}
+
 export async function generateMetadata({
   params,
 }: {

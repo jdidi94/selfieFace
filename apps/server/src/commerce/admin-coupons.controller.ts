@@ -53,4 +53,10 @@ export class AdminCouponsController {
   remove(@Param('id') id: string) {
     return this.couponsService.remove(id);
   }
+
+  @Post(':id/copy-to-market')
+  @Permissions('coupons.create')
+  copyToMarket(@Param('id') id: string, @Body() body: unknown) {
+    return this.couponsService.copyToMarket(id, body);
+  }
 }

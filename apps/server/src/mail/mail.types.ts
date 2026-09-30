@@ -16,6 +16,8 @@ export type MailTemplateType =
   | 'ADMIN_LOW_STOCK'
   | 'MARKETING'
   | 'NEWSLETTER_WELCOME'
+  | 'ACCOUNT_BLOCKED'
+  | 'ACCOUNT_UNBLOCKED'
   | 'RAW';
 
 export type SendMailInput = {
@@ -28,10 +30,13 @@ export type SendMailInput = {
   templateType?: MailTemplateType;
   userId?: string | null;
   orderId?: string | null;
+  marketId?: string | null;
 };
 
 export type OrderMailContext = {
   orderId?: string;
+  marketId: string;
+  customerNotificationsEnabled: boolean;
   userId?: string | null;
   orderNumber: string;
   customerName: string;

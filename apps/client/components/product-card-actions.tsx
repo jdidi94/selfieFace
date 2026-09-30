@@ -22,17 +22,19 @@ export function ProductCardActions({
   const { locale } = useLocale();
   const t = getMessages(locale);
   const [qty, setQty] = useState(1);
-  const [pending, setPending] = useState(false);
   const [showNotify, setShowNotify] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   async function onAdd() {
     if (!variantId || !inStock) return;
-    setPending(true);
+    setAdding(true);
     try {
       await addItem(variantId, qty);
       openBag();
+    } catch {
+      // Feedback bar handles error messaging.
     } finally {
-      setPending(false);
+      setAdding(false);
     }
   }
 
@@ -69,15 +71,15 @@ export function ProductCardActions({
         onChange={setQty}
         decreaseLabel={t.decreaseQty}
         increaseLabel={t.increaseQty}
-        disabled={pending}
+        disabled={adding}
       />
       <Button
         variant="accent"
         className="min-w-0 flex-1 truncate rounded-sm"
-        disabled={pending}
+        disabled={adding}
         onClick={() => void onAdd()}
       >
-        {pending ? t.addingToBag : t.addToBag}
+        {adding ? t.addingToBag : t.addToBag}
       </Button>
     </div>
   );

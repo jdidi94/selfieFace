@@ -1,5 +1,9 @@
 'use client';
 
+import {
+  ConfirmTypedDialog,
+  typedConfirmToken,
+} from '@/components/confirm-typed-dialog';
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { marketLabel, useAdminMarket } from '@/lib/market-context';
@@ -26,6 +30,7 @@ export default function MarketsAdminPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
+  const [pendingDisable, setPendingDisable] = useState<MarketDto | null>(null);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
@@ -56,11 +61,20 @@ export default function MarketsAdminPage() {
         body: JSON.stringify({ enabled }),
       });
       setRows((prev) => prev.map((r) => (r.code === updated.code ? updated : r)));
+      setPendingDisable(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update market');
     } finally {
       setSaving(null);
     }
+  }
+
+  function onEnabledChange(row: MarketDto, enabled: boolean) {
+    if (enabled) {
+      void toggleEnabled(row, true);
+      return;
+    }
+    setPendingDisable(row);
   }
 
   if (authLoading || loading) return <LoadingState label="Loading markets…" />;
@@ -102,7 +116,7 @@ export default function MarketsAdminPage() {
                 <Switch
                   checked={row.enabled}
                   disabled={saving === row.code}
-                  onCheckedChange={(checked) => void toggleEnabled(row, checked)}
+                  onCheckedChange={(checked) => onEnabledChange(row, checked)}
                 />
               </TableCell>
               <TableCell className="text-right">
@@ -118,6 +132,30 @@ export default function MarketsAdminPage() {
           ))}
         </TableBody>
       </Table>
+
+      <ConfirmTypedDialog
+        open={!!pendingDisable}
+        title="Disable market"
+        description={
+          pendingDisable
+            ? `Disable ${marketLabel(pendingDisable.code)}? The storefront for this window will stop serving shoppers.`
+            : ''
+        }
+        confirmLabel={typedConfirmToken(
+          pendingDisable ? marketLabel(pendingDisable.code) : null,
+          'DISABLE',
+        )}
+        confirmValue={typedConfirmToken(
+          pendingDisable ? marketLabel(pendingDisable.code) : null,
+          'DISABLE',
+        )}
+        confirmButtonLabel="Disable"
+        onCancel={() => setPendingDisable(null)}
+        onConfirm={async () => {
+          if (!pendingDisable) return;
+          await toggleEnabled(pendingDisable, false);
+        }}
+      />
     </div>
   );
 }

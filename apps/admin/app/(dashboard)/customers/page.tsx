@@ -70,6 +70,7 @@ export default function CustomersPage() {
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Orders</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Joined</TableHead>
               <TableHead className="text-right">Detail</TableHead>
             </TableRow>
@@ -77,7 +78,7 @@ export default function CustomersPage() {
           <TableBody>
             {!data?.items.length ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={7} className="text-center text-muted-foreground">
                   No customers found.
                 </TableCell>
               </TableRow>
@@ -90,6 +91,13 @@ export default function CustomersPage() {
                   </TableCell>
                   <TableCell>{row.phone ?? '—'}</TableCell>
                   <TableCell>{row.orderCount}</TableCell>
+                  <TableCell>
+                    {row.blockedAt ? (
+                      <span className="text-sm text-destructive">Blocked</span>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Active</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {new Date(row.createdAt).toLocaleDateString()}
                   </TableCell>

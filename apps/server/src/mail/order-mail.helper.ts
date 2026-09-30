@@ -38,9 +38,8 @@ export class OrderMailHelper {
       null;
     if (!email) {
       this.logger.log(
-        `[mail] skip order=${order.number} — no customer email (guest/phone-only)`,
+        `[mail] customer email unavailable for order=${order.number}; admin notification can still be sent`,
       );
-      return null;
     }
 
     const nameParts = [
@@ -55,14 +54,18 @@ export class OrderMailHelper {
     const orderUrl =
       isGuest && order.guestAccessToken
         ? `${storefrontUrl}/orders/track?number=${encodeURIComponent(order.number)}&token=${encodeURIComponent(order.guestAccessToken)}`
-        : `${storefrontUrl}/account/orders/${order.id}`;
+        : isGuest
+          ? `${storefrontUrl}/orders/track?number=${encodeURIComponent(order.number)}`
+          : `${storefrontUrl}/account/orders/${order.id}`;
 
     return {
       orderId: order.id,
+      marketId: order.marketId,
+      customerNotificationsEnabled: order.customer.emailNotificationsEnabled,
       userId: order.customer.userId,
       orderNumber: order.number,
       customerName,
-      email,
+      email: email ?? '',
       currency: order.currency,
       total: order.total,
       status: order.status,
@@ -81,11 +84,19 @@ export class OrderMailHelper {
   async sendConfirmation(orderId: string): Promise<void> {
     const ctx = await this.loadContext(orderId);
     if (!ctx) return;
-    const result = await this.mail.sendOrderConfirmation(ctx);
-    this.logger.log(
-      `[mail] order-confirmation ${ctx.orderNumber} sent=${result.sent} ${result.skippedReason ?? result.messageId ?? ''}`,
-    );
-    await this.mail.notifyAdminNewOrder(ctx);
+    const settings = await this.prisma.storeSettings.findUnique({
+      where: { marketId: ctx.marketId },
+      select: { customerOrderEmailsEnabled: true, adminOrderEmailsEnabled: true },
+    });
+    if (ctx.email && ctx.customerNotificationsEnabled && settings?.customerOrderEmailsEnabled !== false) {
+      const result = await this.mail.sendOrderConfirmation(ctx);
+      this.logger.log(
+        `[mail] order-confirmation ${ctx.orderNumber} sent=${result.sent} ${result.skippedReason ?? result.messageId ?? ''}`,
+      );
+    }
+    if (settings?.adminOrderEmailsEnabled !== false) {
+      await this.mail.notifyAdminNewOrder(ctx);
+    }
   }
 
   async sendStatusChange(
@@ -95,6 +106,13 @@ export class OrderMailHelper {
   ): Promise<void> {
     const ctx = await this.loadContext(orderId, { trackingNote: note });
     if (!ctx) return;
+    if (!ctx.email) return;
+    if (!ctx.customerNotificationsEnabled) return;
+    const settings = await this.prisma.storeSettings.findUnique({
+      where: { marketId: ctx.marketId },
+      select: { customerOrderEmailsEnabled: true },
+    });
+    if (settings?.customerOrderEmailsEnabled === false) return;
 
     let result;
     if (status === OrderStatus.SHIPPED) {

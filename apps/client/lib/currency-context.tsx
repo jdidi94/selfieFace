@@ -3,6 +3,13 @@
 import { Currency } from '@lumea/types';
 import { currencyFromRegion } from '@lumea/utils';
 import {
+  CURRENCY_COOKIE,
+  CURRENCY_COOKIE_LEGACY,
+  PREFERENCE_COOKIE_MAX_AGE,
+  readCookieMigrating,
+  writeCookieMigrating,
+} from '@/lib/storefront-cookies';
+import {
   createContext,
   useContext,
   useEffect,
@@ -11,23 +18,11 @@ import {
   type ReactNode,
 } from 'react';
 
-const COOKIE = 'lumea_currency';
-
 type CurrencyContextValue = {
   currency: Currency;
 };
 
 const CurrencyContext = createContext<CurrencyContextValue | null>(null);
-
-function readCookie(name: string): string | null {
-  if (typeof document === 'undefined') return null;
-  const match = document.cookie.match(new RegExp(`${name}=([^;]+)`));
-  return match?.[1] ?? null;
-}
-
-function writeCookie(name: string, value: string) {
-  document.cookie = `${name}=${value};path=/;max-age=${60 * 60 * 24 * 365};samesite=lax`;
-}
 
 function parseCurrency(value: string | null | undefined): Currency | null {
   if (value === Currency.USD) return Currency.USD;
@@ -49,7 +44,9 @@ export function CurrencyProvider({
   const [currency, setCurrencyState] = useState<Currency>(initialCurrency);
 
   useEffect(() => {
-    const fromCookie = parseCurrency(readCookie(COOKIE));
+    const fromCookie = parseCurrency(
+      readCookieMigrating(CURRENCY_COOKIE, CURRENCY_COOKIE_LEGACY, PREFERENCE_COOKIE_MAX_AGE),
+    );
     if (fromCookie) {
       if (fromCookie !== initialCurrency) setCurrencyState(fromCookie);
       return;
@@ -61,7 +58,12 @@ export function CurrencyProvider({
         : '';
     const detected = currencyFromRegion(region) as Currency;
     setCurrencyState(detected);
-    writeCookie(COOKIE, detected);
+    writeCookieMigrating(
+      CURRENCY_COOKIE,
+      CURRENCY_COOKIE_LEGACY,
+      detected,
+      PREFERENCE_COOKIE_MAX_AGE,
+    );
   }, [initialCurrency]);
 
   const value = useMemo(() => ({ currency }), [currency]);

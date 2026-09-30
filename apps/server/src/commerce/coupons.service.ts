@@ -11,12 +11,21 @@ import {
   type Coupon,
   type Prisma,
 } from '@prisma/client';
-import type { ActiveCouponDto, CouponDto, MarketCode } from '@lumea/types';
+import type {
+  ActiveCouponDto,
+  CatalogCopyResult,
+  CouponDto,
+  MarketCode,
+} from '@lumea/types';
 import {
   CouponProductScope as SharedCouponProductScope,
   CouponType as SharedCouponType,
 } from '@lumea/types';
 import { couponUpsertSchema } from '@lumea/validation';
+import {
+  convertMinorBetweenCurrencies,
+  resolveCopyTarget,
+} from '../catalog/catalog-copy.util';
 import { MarketsService } from '../markets/markets.service';
 import { marketCodeFromCurrencyValue, parseMarketCode } from '../markets/market.util';
 import { PrismaService } from '../prisma/prisma.service';
@@ -107,6 +116,86 @@ export class CouponsService {
     const existing = await this.prisma.coupon.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Coupon not found');
     await this.prisma.coupon.delete({ where: { id } });
+  }
+
+  async copyToMarket(id: string, input: unknown): Promise<CatalogCopyResult> {
+    const existing = await this.prisma.coupon.findUnique({
+      where: { id },
+      include: { market: true },
+    });
+    if (!existing) throw new NotFoundException('Coupon not found');
+
+    const { target, sourceCode, targetCode } = await resolveCopyTarget(
+      this.marketsService,
+      input,
+      existing.market.code,
+    );
+
+    const clash = await this.prisma.coupon.findUnique({
+      where: {
+        marketId_code: { marketId: target.id, code: existing.code },
+      },
+    });
+    if (clash) {
+      throw new BadRequestException(
+        `Coupon code "${existing.code}" already exists in ${targetCode}`,
+      );
+    }
+
+    const warnings: string[] = [];
+    let amountOff = existing.amountOff;
+    let minSubtotal = existing.minSubtotal;
+    if (existing.type === CouponType.FIXED || existing.minSubtotal != null) {
+      const fromCur = existing.market.currency;
+      const toCur = target.currency;
+      if (existing.type === CouponType.FIXED && amountOff != null) {
+        amountOff = convertMinorBetweenCurrencies(amountOff, fromCur, toCur);
+      }
+      if (minSubtotal != null) {
+        minSubtotal = convertMinorBetweenCurrencies(minSubtotal, fromCur, toCur);
+      }
+    }
+
+    // Product IDs are market-scoped; tags still apply across markets.
+    let productIds = existing.productIds ?? [];
+    if (productIds.length) {
+      warnings.push(
+        `Cleared ${productIds.length} product ID(s) — they are not valid in ${targetCode}. Re-link products after switching market.`,
+      );
+      productIds = [];
+    }
+
+    const created = await this.prisma.coupon.create({
+      data: {
+        code: existing.code,
+        type: existing.type,
+        description: existing.description,
+        percentOff: existing.percentOff,
+        amountOff,
+        minSubtotal,
+        maxUses: existing.maxUses,
+        maxUsesPerCustomer: existing.maxUsesPerCustomer,
+        usedCount: 0,
+        startsAt: existing.startsAt,
+        endsAt: existing.endsAt,
+        isActive: existing.isActive,
+        marketId: target.id,
+        productScope: existing.productScope,
+        productTags: existing.productTags,
+        productIds,
+        ruleIsNew: existing.ruleIsNew,
+        ruleMinPriceUsd: existing.ruleMinPriceUsd,
+        ruleMinRating: existing.ruleMinRating,
+      },
+    });
+
+    return {
+      id: created.id,
+      type: 'coupon',
+      sourceMarket: sourceCode,
+      targetMarket: targetCode,
+      warnings,
+    };
   }
 
   /** Public list of currently active coupons for the visitor’s market. */

@@ -1,5 +1,10 @@
 'use client';
 
+import {
+  ConfirmTypedDialog,
+  typedConfirmToken,
+} from '@/components/confirm-typed-dialog';
+import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
 import { ProductPicker } from '@/components/product-picker';
 import { adminFetch } from '@/lib/api';
@@ -7,7 +12,13 @@ import { useAuth } from '@/lib/auth-context';
 import { useAdminMarket } from '@/lib/market-context';
 import { submitErrorState, validateWithSchema } from '@/lib/validate-form';
 import { couponUpsertSchema } from '@lumea/validation';
-import { CouponProductScope, CouponType, CURRENCY_BY_MARKET, type CouponDto } from '@lumea/types';
+import {
+  CouponProductScope,
+  CouponType,
+  CURRENCY_BY_MARKET,
+  type CatalogCopyResult,
+  type CouponDto,
+} from '@lumea/types';
 import { formatMoney } from '@lumea/utils';
 import {
   Badge,
@@ -158,11 +169,17 @@ export default function CouponsPage() {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [pendingDelete, setPendingDelete] = useState<CouponDto | null>(null);
+  const [pendingCopy, setPendingCopy] = useState<CouponDto | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [selectedCouponIds, setSelectedCouponIds] = useState<string[]>([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   async function load() {
     if (!accessToken) return;
     const data = await adminFetch<CouponDto[]>('/admin/coupons', accessToken);
     setItems(data);
+    setSelectedCouponIds([]);
     setLoading(false);
   }
 
@@ -225,6 +242,26 @@ export default function CouponsPage() {
     await load();
   }
 
+  async function removeSelected() {
+    if (!accessToken || selectedCouponIds.length === 0) return;
+    const confirmation = `DELETE ${selectedCouponIds.length}`;
+    if (!window.confirm(`Permanently delete ${selectedCouponIds.length} selected coupons? This may affect future redemptions.`)) return;
+    if (window.prompt(`Type ${confirmation} to confirm this bulk deletion.`) !== confirmation) return;
+    setBulkDeleting(true);
+    setError(null);
+    const results = await Promise.allSettled(
+      selectedCouponIds.map((id) =>
+        adminFetch(`/admin/coupons/${id}`, accessToken, { method: 'DELETE' }),
+      ),
+    );
+    const failed = results.filter((result) => result.status === 'rejected').length;
+    const deleted = results.length - failed;
+    setSelectedCouponIds([]);
+    if (failed) setError(`${deleted} deleted; ${failed} could not be deleted.`);
+    await load();
+    setBulkDeleting(false);
+  }
+
   if (authLoading || loading) return <LoadingState />;
 
   return (
@@ -233,8 +270,9 @@ export default function CouponsPage() {
         <div className="space-y-2">
           <h1 className="font-display text-3xl">Coupons</h1>
           <p className="max-w-3xl text-sm text-muted-foreground">
-            Coupons apply only in the <strong>working market</strong> (sidebar switcher). Create
-            separate codes per window — there is no copy between markets.
+            Coupons apply only in the <strong>working market</strong> (sidebar switcher). Use{' '}
+            <strong>Copy to market…</strong> to clone a coupon into another window (same code is
+            allowed per market).
           </p>
           <ul className="max-w-3xl list-disc space-y-1 pl-5 text-sm text-muted-foreground">
             <li>
@@ -256,9 +294,25 @@ export default function CouponsPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-surface">
+        {selectedCouponIds.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-3">
+            <p className="text-sm">{selectedCouponIds.length} coupon(s) selected</p>
+            <Button variant="destructive" size="sm" disabled={bulkDeleting} onClick={() => void removeSelected()}>
+              {bulkDeleting ? 'Deleting…' : 'Delete selected'}
+            </Button>
+          </div>
+        ) : null}
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  aria-label="Select all coupons"
+                  checked={items.length > 0 && items.every((item) => selectedCouponIds.includes(item.id))}
+                  onChange={(event) => setSelectedCouponIds(event.target.checked ? items.map((item) => item.id) : [])}
+                />
+              </TableHead>
               <TableHead>Code</TableHead>
               <TableHead>Discount</TableHead>
               <TableHead>Uses</TableHead>
@@ -269,6 +323,17 @@ export default function CouponsPage() {
           <TableBody>
             {items.map((item) => (
               <TableRow key={item.id}>
+                <TableCell>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select coupon ${item.code}`}
+                    checked={selectedCouponIds.includes(item.id)}
+                    onChange={(event) => setSelectedCouponIds((current) =>
+                      event.target.checked
+                        ? [...current, item.id]
+                        : current.filter((id) => id !== item.id))}
+                  />
+                </TableCell>
                 <TableCell className="font-medium">{item.code}</TableCell>
                 <TableCell>
                   <Badge variant="secondary">{summarizeDiscount(item)}</Badge>
@@ -282,7 +347,21 @@ export default function CouponsPage() {
                   <Button variant="outline" size="sm" onClick={() => openEdit(item)}>
                     Edit
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={() => void remove(item.id)}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setCopyMessage(null);
+                      setPendingCopy(item);
+                    }}
+                  >
+                    Copy to market…
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => setPendingDelete(item)}
+                  >
                     Delete
                   </Button>
                 </TableCell>
@@ -290,7 +369,7 @@ export default function CouponsPage() {
             ))}
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
+                <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
                   No coupons yet.
                 </TableCell>
               </TableRow>
@@ -298,6 +377,52 @@ export default function CouponsPage() {
           </TableBody>
         </Table>
       </div>
+
+      {copyMessage ? (
+        <p className="text-sm text-muted-foreground">{copyMessage}</p>
+      ) : null}
+
+      <ConfirmTypedDialog
+        open={!!pendingDelete}
+        title="Delete coupon"
+        description={
+          pendingDelete
+            ? `This permanently deletes coupon “${pendingDelete.code}”. Customers will no longer be able to redeem it.`
+            : ''
+        }
+        confirmLabel={typedConfirmToken(pendingDelete?.code, 'DELETE')}
+        confirmValue={typedConfirmToken(pendingDelete?.code, 'DELETE')}
+        confirmButtonLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          await remove(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+      />
+
+      <CopyToMarketDialog
+        open={!!pendingCopy}
+        entityName={pendingCopy?.code ?? ''}
+        entityKind="coupon"
+        sourceMarket={market}
+        onCancel={() => setPendingCopy(null)}
+        onCopy={async (targetMarket) => {
+          if (!accessToken || !pendingCopy) {
+            throw new Error('Not signed in');
+          }
+          return adminFetch<CatalogCopyResult>(
+            `/admin/coupons/${pendingCopy.id}/copy-to-market`,
+            accessToken,
+            { method: 'POST', body: JSON.stringify({ targetMarket }) },
+          );
+        }}
+        onCopied={(result) => {
+          if (!result.warnings.length) {
+            setCopyMessage(`Copied coupon to ${result.targetMarket}`);
+          }
+        }}
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">

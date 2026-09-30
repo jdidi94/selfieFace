@@ -3,9 +3,11 @@
 import { LocaleLink } from '@/components/locale-link';
 import { apiUrl, mediaUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { useCart } from '@/lib/cart-context';
 import { useCurrency } from '@/lib/currency-context';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
+import { useStorefrontPanels } from '@/lib/storefront-panels';
 import type { WishlistItemDto } from '@lumea/types';
 import { formatMoney } from '@lumea/utils';
 import { Button, EmptyState, LoadingState, ProductImage } from '@lumea/ui';
@@ -16,6 +18,8 @@ export default function WishlistPage() {
   const { user, accessToken, loading: authLoading } = useAuth();
   const { currency } = useCurrency();
   const { locale } = useLocale();
+  const { addItem } = useCart();
+  const { openBag } = useStorefrontPanels();
   const t = getMessages(locale);
   const router = useRouter();
   const [items, setItems] = useState<WishlistItemDto[]>([]);
@@ -49,6 +53,14 @@ export default function WishlistPage() {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     await load();
+  }
+
+  function addToBag(item: WishlistItemDto) {
+    if (!item.defaultVariantId || !item.inStock) return;
+    openBag();
+    void addItem(item.defaultVariantId, 1).catch(() => {
+      // Feedback bar handles error messaging.
+    });
   }
 
   if (authLoading || loading) return <LoadingState className="py-24" />;
@@ -98,10 +110,16 @@ export default function WishlistPage() {
                     )}
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" asChild>
-                    <LocaleLink href={`/products/${item.productSlug}`}>{t.view}</LocaleLink>
-                  </Button>
+                <div className="flex flex-wrap gap-2">
+                  {item.defaultVariantId && item.inStock ? (
+                    <Button size="sm" onClick={() => addToBag(item)}>
+                      {t.addToBag}
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" asChild>
+                      <LocaleLink href={`/products/${item.productSlug}`}>{t.view}</LocaleLink>
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"

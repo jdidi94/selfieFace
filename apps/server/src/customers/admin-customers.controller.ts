@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { UserType } from '@prisma/client';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { UserTypes } from '../auth/decorators/user-types.decorator';
@@ -23,5 +23,17 @@ export class AdminCustomersController {
   @Permissions('customers.read')
   get(@Param('id') id: string) {
     return this.customersService.getAdmin(id);
+  }
+
+  @Post(':id/block')
+  @Permissions('customers.update')
+  block(@Param('id') id: string) {
+    return this.customersService.blockCustomer(id);
+  }
+
+  @Post(':id/unblock')
+  @Permissions('customers.update')
+  unblock(@Param('id') id: string) {
+    return this.customersService.unblockCustomer(id);
   }
 }

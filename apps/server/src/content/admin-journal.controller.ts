@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { UserType } from '@prisma/client';
@@ -26,8 +27,8 @@ export class AdminJournalController {
 
   @Get()
   @Permissions('content.read')
-  list(@AdminMarketCode() market: MarketCode) {
-    return this.journalService.listAdmin(market);
+  list(@AdminMarketCode() market: MarketCode, @Query() query: unknown) {
+    return this.journalService.listAdmin(market, query);
   }
 
   @Get(':id')

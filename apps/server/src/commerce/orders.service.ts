@@ -22,6 +22,7 @@ import {
   guestOrderTrackSchema,
   orderAdminListQuerySchema,
   orderCancelSchema,
+  orderLockSchema,
   orderRefundSchema,
   orderStatusUpdateSchema,
 } from '@lumea/validation';
@@ -32,7 +33,9 @@ import { parseMarketCode } from '../markets/market.util';
 import { OrderMailHelper } from '../mail/order-mail.helper';
 import { PrismaService } from '../prisma/prisma.service';
 import { restockFromAllocations } from '../inventory/warehouse-stock.util';
+import { computeOrderRefundPreview } from './refund-policy.util';
 import { StockNotifyService } from './stock-notify.service';
+import { StoreSettingsService } from './store-settings.service';
 
 type RestockNotify = {
   variantId: string;
@@ -81,6 +84,7 @@ export class OrdersService {
     private readonly stockNotify: StockNotifyService,
     private readonly loyaltyService: LoyaltyService,
     private readonly marketsService: MarketsService,
+    private readonly settingsService: StoreSettingsService,
   ) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (key) this.stripe = new Stripe(key);
@@ -115,7 +119,9 @@ export class OrdersService {
   private canCustomerCancel(order: {
     status: OrderStatus;
     paymentStatus: PaymentStatus;
+    lockedAt?: Date | null;
   }): boolean {
+    if (order.lockedAt) return false;
     const cancellableStatus =
       order.status === OrderStatus.PENDING || order.status === OrderStatus.PROCESSING;
     return (
@@ -169,6 +175,11 @@ export class OrdersService {
       refundAmount?: number | null;
       paymentProvider?: string | null;
       konnectPaymentRef?: string | null;
+      lockedAt?: Date | null;
+      customer?: {
+        email?: string | null;
+        user?: { email?: string | null } | null;
+      } | null;
       items: Array<{
         id: string;
         productName: string;
@@ -191,6 +202,10 @@ export class OrdersService {
       payUrl?: string | null;
     },
   ): OrderDto {
+    const customerEmail =
+      order.customer?.user?.email?.trim() ||
+      order.customer?.email?.trim() ||
+      null;
     return {
       id: order.id,
       number: order.number,
@@ -201,6 +216,7 @@ export class OrdersService {
       marketCode: order.market?.code
         ? parseMarketCode(order.market.code)
         : undefined,
+      customerEmail,
       subtotal: order.subtotal,
       discount: order.discount,
       shippingAmount: order.shippingAmount,
@@ -248,6 +264,7 @@ export class OrdersService {
       paymentProvider: order.paymentProvider ?? null,
       payUrl: opts?.payUrl ?? null,
       konnectPaymentRef: order.konnectPaymentRef ?? null,
+      lockedAt: order.lockedAt?.toISOString() ?? null,
     };
   }
 
@@ -339,8 +356,12 @@ export class OrdersService {
 
     const timeline = this.mapTimeline(order.timelineEvents);
     const base = this.mapOrder(order, { timeline });
+    const refundPreview = await this.buildRefundPreview(order, order.timelineEvents);
+
     return {
       ...base,
+      canRefund: this.canAdminRefund(order) && refundPreview.eligible,
+      refundPreview,
       customer: {
         email:
           order.customer.user?.email ??
@@ -349,6 +370,57 @@ export class OrdersService {
         lastName: order.customer.user?.lastName ?? null,
       },
     };
+  }
+
+  private async buildRefundPreview(
+    order: {
+      status: OrderStatus;
+      currency: string;
+      subtotal: number;
+      discount: number;
+      shippingAmount: number;
+      taxAmount: number;
+      total: number;
+      createdAt: Date;
+      market?: { code: string } | null;
+      marketId?: string;
+    },
+    timeline: Array<{ status: OrderStatus; createdAt: Date }>,
+  ) {
+    const marketCode = order.market?.code
+      ? parseMarketCode(order.market.code)
+      : undefined;
+    const settings = marketCode
+      ? await this.settingsService.get(marketCode)
+      : await this.settingsService.getByCurrency(order.currency);
+    return computeOrderRefundPreview(order, settings, timeline);
+  }
+
+  private assertStatusUnlocked(order: { lockedAt?: Date | null; number?: string }) {
+    if (order.lockedAt) {
+      throw new BadRequestException(
+        `Order${order.number ? ` ${order.number}` : ''} is locked. Unlock it before changing status.`,
+      );
+    }
+  }
+
+  async setLockAdmin(id: string, input: unknown): Promise<AdminOrderDto> {
+    const parsed = orderLockSchema.safeParse(input);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+
+    const order = await this.prisma.order.findUnique({ where: { id } });
+    if (!order) throw new NotFoundException('Order not found');
+
+    const nextLockedAt = parsed.data.locked ? new Date() : null;
+    if (Boolean(order.lockedAt) === parsed.data.locked) {
+      return this.getAdmin(id);
+    }
+
+    await this.prisma.order.update({
+      where: { id },
+      data: { lockedAt: nextLockedAt },
+    });
+    return this.getAdmin(id);
   }
 
   async updateStatusAdmin(id: string, input: unknown): Promise<AdminOrderDto> {
@@ -365,13 +437,17 @@ export class OrdersService {
         where: { id },
         include: orderItemsInclude,
       });
+      this.assertStatusUnlocked(order);
       if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.DELIVERED) {
         throw new BadRequestException('Order cannot be updated');
       }
       this.assertTransition(order.status, next);
       await tx.order.update({
         where: { id },
-        data: { status: next },
+        data: {
+          status: next,
+          ...(next === OrderStatus.DELIVERED ? { guestAccessToken: null } : {}),
+        },
       });
       await this.recordTimelineEvent(
         id,
@@ -428,7 +504,11 @@ export class OrdersService {
 
     const order = await this.prisma.order.findUniqueOrThrow({
       where: { id },
-      include: orderItemsInclude,
+      include: {
+        ...orderItemsInclude,
+        timelineEvents: { orderBy: { createdAt: 'asc' } },
+        market: true,
+      },
     });
 
     if (order.paymentStatus === PaymentStatus.REFUNDED || order.stripeRefundId) {
@@ -438,7 +518,23 @@ export class OrdersService {
       throw new BadRequestException('Only captured card payments can be refunded');
     }
 
-    const refund = await this.stripeRefundOrder(order);
+    const preview = await this.buildRefundPreview(order, order.timelineEvents);
+    if (!preview.eligible) {
+      throw new BadRequestException(preview.reason ?? 'Refund is not allowed by policy');
+    }
+
+    let refundAmount = preview.amount;
+    if (parsed.data.amount != null) {
+      if (parsed.data.amount > order.total) {
+        throw new BadRequestException('Refund amount cannot exceed order total');
+      }
+      refundAmount = parsed.data.amount;
+    }
+    if (refundAmount <= 0) {
+      throw new BadRequestException('Refund amount must be greater than zero');
+    }
+
+    const refund = await this.stripeRefundOrder(order, refundAmount);
     const shouldCancel =
       parsed.data.cancelOrder !== false &&
       (order.status === OrderStatus.PENDING || order.status === OrderStatus.PROCESSING);
@@ -506,6 +602,8 @@ export class OrdersService {
       include: orderItemsInclude,
     });
 
+    this.assertStatusUnlocked(order);
+
     if (order.status === OrderStatus.CANCELLED) {
       return this.getAdmin(id);
     }
@@ -532,7 +630,7 @@ export class OrdersService {
       if (actor === OrderTimelineActorType.CUSTOMER) {
         throw new BadRequestException('Paid orders cannot be cancelled by customer');
       }
-      const refund = await this.stripeRefundOrder(order);
+      const refund = await this.stripeRefundOrder(order, order.total);
       refundId = refund.id;
       refundAmount = refund.amount;
       nextPaymentStatus = PaymentStatus.REFUNDED;
@@ -564,6 +662,7 @@ export class OrdersService {
           data: {
             status: OrderStatus.CANCELLED,
             paymentStatus: nextPaymentStatus,
+            guestAccessToken: null,
             ...(refundId
               ? {
                   stripeRefundId: refundId,
@@ -605,23 +704,32 @@ export class OrdersService {
 
   private async stripeRefundOrder(
     order: OrderWithItems,
+    amount?: number,
   ): Promise<{ id: string; amount: number }> {
+    const refundAmount = Math.max(
+      0,
+      Math.min(order.total, amount ?? order.total),
+    );
+    if (refundAmount <= 0) {
+      throw new BadRequestException('Refund amount must be greater than zero');
+    }
+
     if (order.stripeRefundId) {
-      return { id: order.stripeRefundId, amount: order.refundAmount ?? order.total };
+      return { id: order.stripeRefundId, amount: order.refundAmount ?? refundAmount };
     }
 
     if (!order.stripePaymentIntentId) {
-      return { id: `manual_${order.id}`, amount: order.total };
+      return { id: `manual_${order.id}`, amount: refundAmount };
     }
 
     if (!this.stripe) {
-      return { id: `dev_refund_${order.id}`, amount: order.total };
+      return { id: `dev_refund_${order.id}`, amount: refundAmount };
     }
 
     try {
       const refund = await this.stripe.refunds.create({
         payment_intent: order.stripePaymentIntentId,
-        amount: order.total,
+        amount: refundAmount,
         reason: 'requested_by_customer',
         metadata: {
           orderId: order.id,
@@ -712,13 +820,33 @@ export class OrdersService {
       include: {
         items: { include: orderItemInclude },
         timelineEvents: { orderBy: { createdAt: 'asc' } },
+        customer: {
+          include: {
+            user: { select: { email: true } },
+          },
+        },
       },
     });
     if (
-      !order ||
-      !order.guestAccessToken ||
-      order.guestAccessToken !== parsed.data.token
+      !order?.guestAccessToken ||
+      order.status === OrderStatus.CANCELLED ||
+      order.status === OrderStatus.DELIVERED
     ) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const { email, token } = parsed.data;
+    let authorized = false;
+    if (token) {
+      authorized = order.guestAccessToken === token;
+    } else if (email) {
+      const orderEmail =
+        order.customer.user?.email?.trim().toLowerCase() ||
+        order.customer.email?.trim().toLowerCase() ||
+        null;
+      authorized = Boolean(orderEmail && orderEmail === email);
+    }
+    if (!authorized) {
       throw new NotFoundException('Order not found');
     }
 
@@ -751,12 +879,11 @@ export class OrdersService {
       );
     }
 
-    await this.cancelOrderInternal(
+    return this.cancelOrderInternal(
       orderId,
       OrderTimelineActorType.CUSTOMER,
       parsed.data.note ?? 'Cancelled by guest',
     );
-    return this.getOrderForAccess(orderId, { guestAccessToken });
   }
 
   async getCustomerOrder(userId: string, orderId: string): Promise<OrderDto> {
@@ -772,6 +899,11 @@ export class OrdersService {
       include: {
         items: { include: orderItemInclude },
         timelineEvents: { orderBy: { createdAt: 'asc' } },
+        customer: {
+          include: {
+            user: { select: { email: true } },
+          },
+        },
       },
     });
     if (!order) throw new NotFoundException('Order not found');
@@ -784,7 +916,9 @@ export class OrdersService {
     } else if (
       opts.guestAccessToken &&
       order.guestAccessToken &&
-      opts.guestAccessToken === order.guestAccessToken
+      opts.guestAccessToken === order.guestAccessToken &&
+      order.status !== OrderStatus.CANCELLED &&
+      order.status !== OrderStatus.DELIVERED
     ) {
       // guest OK
     } else {
@@ -803,7 +937,14 @@ export class OrdersService {
 
     const rows = await this.prisma.order.findMany({
       where: { customerId: customer.id },
-      include: orderItemsInclude,
+      include: {
+        ...orderItemsInclude,
+        customer: {
+          include: {
+            user: { select: { email: true } },
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
     return rows.map((o) => this.mapOrder(o));

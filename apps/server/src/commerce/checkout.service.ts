@@ -247,7 +247,7 @@ export class CheckoutService {
     const shipping = totals.shipping;
     const taxAmount = totals.taxAmount;
     const total = totals.total;
-    const number = `LM-${Date.now().toString(36).toUpperCase()}`;
+    const number = `SF-${Date.now().toString(36).toUpperCase()}`;
 
     let couponId: string | null = null;
     let couponCode: string | null = null;
@@ -310,6 +310,7 @@ export class CheckoutService {
             shippingCountry: shippingAddress.country.toUpperCase(),
             shippingPhone,
             guestAccessToken,
+            policiesAcceptedAt: new Date(),
             idempotencyKey,
             couponId,
             couponCode,
@@ -390,6 +391,10 @@ export class CheckoutService {
           : isGuest
             ? 'COD'
             : 'CARD';
+
+    if (requested === 'CARD' && isGuest) {
+      throw new UnauthorizedException('Sign in to pay by card');
+    }
 
     if (requested === 'COD') {
       if (!settings.cashOnDeliveryEnabled) {
@@ -843,7 +848,7 @@ export class CheckoutService {
 
     if (newlyFinalized) {
       void this.orderMail.sendConfirmation(orderId);
-      void this.notifyLowStockCrossings(lowStockEvents);
+      void this.notifyLowStockCrossings(lowStockEvents, result.marketId);
       void this.loyaltyService.earnForCommittedOrder(orderId);
     }
 
@@ -929,7 +934,7 @@ export class CheckoutService {
 
     if (newlyFinalized) {
       void this.orderMail.sendConfirmation(orderId);
-      void this.notifyLowStockCrossings(lowStockEvents);
+      void this.notifyLowStockCrossings(lowStockEvents, order.marketId);
       void this.loyaltyService.earnForCommittedOrder(orderId);
     }
 
@@ -944,10 +949,14 @@ export class CheckoutService {
       variantName: string;
       productName: string;
     }>,
+    marketId: string,
   ) {
     if (!events.length) return;
-    const settings = await this.settingsService.getByCurrency(Currency.USD);
-    const threshold = settings.lowStockThreshold;
+    const settings = await this.prisma.storeSettings.findUnique({
+      where: { marketId },
+      select: { lowStockThreshold: true },
+    });
+    const threshold = settings?.lowStockThreshold ?? 5;
     for (const event of events) {
       if (!crossedLowStockThreshold(event.previousStock, event.nextStock, threshold)) {
         continue;
@@ -955,10 +964,11 @@ export class CheckoutService {
       await this.mail.notifyAdminLowStock({
         productName: event.productName,
         variantName: event.variantName,
-        sku: event.sku,
-        stock: event.nextStock,
-        threshold,
-      });
+          sku: event.sku,
+          stock: event.nextStock,
+          threshold,
+          marketId,
+        });
     }
   }
 }

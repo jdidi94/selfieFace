@@ -17,18 +17,24 @@ import {
 } from '@lumea/ui';
 import { MarketCode } from '@lumea/types';
 import {
+  Activity,
   BarChart3,
   BookOpen,
+  CircleHelp,
   FileText,
+  Inbox,
   LayoutDashboard,
   Mail,
   Megaphone,
   MessageSquare,
   Package,
   LayoutGrid,
+  CreditCard,
+  Phone,
   Settings,
   ShoppingCart,
   TicketPercent,
+  Truck,
   Users,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -57,11 +63,16 @@ const navSections = [
       { href: '/orders', label: 'Orders', icon: ShoppingCart },
       { href: '/customers', label: 'Customers', icon: Users },
       { href: '/reviews', label: 'Reviews', icon: MessageSquare },
+      { href: '/support/tickets', label: 'Tickets', icon: Inbox },
     ],
   },
   {
     label: 'Content',
-    items: [{ href: '/content/journal', label: 'Journal', icon: FileText }],
+    items: [
+      { href: '/content/journal', label: 'Journal', icon: FileText },
+      { href: '/content/faq', label: 'FAQ', icon: CircleHelp },
+      { href: '/content/policies', label: 'Policies & rules', icon: FileText },
+    ],
   },
   {
     label: 'Marketing',
@@ -76,13 +87,20 @@ const navSections = [
   },
   {
     label: 'Insights',
-    items: [{ href: '/analytics', label: 'Analytics', icon: BarChart3 }],
+    items: [
+      { href: '/analytics', label: 'Analytics', icon: BarChart3 },
+      { href: '/analytics/behavior', label: 'Behavior', icon: Activity },
+    ],
   },
   {
     label: 'System',
     items: [
       { href: '/help', label: 'Admin guide', icon: BookOpen },
       { href: '/catalog/settings', label: 'Settings', icon: Settings },
+      { href: '/catalog/settings/shipping', label: 'Shipping', icon: Truck },
+      { href: '/catalog/settings/contact', label: 'Contact & social', icon: Phone },
+      { href: '/catalog/settings/payments', label: 'Payments', icon: CreditCard },
+      { href: '/catalog/settings/mail', label: 'Email settings', icon: Mail },
       { href: '/catalog/markets', label: 'Markets', icon: Settings },
     ],
   },

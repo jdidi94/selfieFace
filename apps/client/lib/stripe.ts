@@ -1,4 +1,17 @@
 import { loadStripe, type Stripe } from '@stripe/stripe-js';
+import {
+  CHECKOUT_IDEMPOTENCY_KEY,
+  CHECKOUT_IDEMPOTENCY_KEY_LEGACY,
+  GUEST_ORDER_TOKEN_KEY,
+  GUEST_ORDER_TOKEN_KEY_LEGACY,
+  GUEST_ORDER_TOKENS_KEY,
+  GUEST_ORDER_TOKENS_KEY_LEGACY,
+  PENDING_PAYMENT_KEY,
+  PENDING_PAYMENT_KEY_LEGACY,
+  readStorageMigrating,
+  removeStorageMigrating,
+  writeStorageMigrating,
+} from '@/lib/storefront-cookies';
 
 let stripePromise: Promise<Stripe | null> | null = null;
 
@@ -17,11 +30,12 @@ export function getStripe(publishableKey?: string | null): Promise<Stripe | null
   return stripePromise;
 }
 
-export const PENDING_PAYMENT_KEY = 'lumea_pending_payment';
-export const GUEST_ORDER_TOKEN_KEY = 'lumea_guest_order_token';
-/** Persists guest tokens by order number for later track lookup (survives session). */
-export const GUEST_ORDER_TOKENS_KEY = 'lumea_guest_order_tokens';
-export const CHECKOUT_IDEMPOTENCY_KEY = 'lumea_checkout_idempotency';
+export {
+  PENDING_PAYMENT_KEY,
+  GUEST_ORDER_TOKEN_KEY,
+  GUEST_ORDER_TOKENS_KEY,
+  CHECKOUT_IDEMPOTENCY_KEY,
+};
 
 export type PendingPayment = {
   orderId: string;
@@ -35,7 +49,11 @@ type StoredCheckoutIdempotency = { cartId: string; key: string };
 export function getOrCreateCheckoutIdempotencyKey(cartId: string): string {
   if (typeof window === 'undefined') return `srv-${cartId}-${Date.now()}`;
   try {
-    const raw = sessionStorage.getItem(CHECKOUT_IDEMPOTENCY_KEY);
+    const raw = readStorageMigrating(
+      sessionStorage,
+      CHECKOUT_IDEMPOTENCY_KEY,
+      CHECKOUT_IDEMPOTENCY_KEY_LEGACY,
+    );
     if (raw) {
       const parsed = JSON.parse(raw) as StoredCheckoutIdempotency;
       if (parsed.cartId === cartId && parsed.key?.length >= 8) return parsed.key;
@@ -44,8 +62,10 @@ export function getOrCreateCheckoutIdempotencyKey(cartId: string): string {
       typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
         : `ck-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    sessionStorage.setItem(
+    writeStorageMigrating(
+      sessionStorage,
       CHECKOUT_IDEMPOTENCY_KEY,
+      CHECKOUT_IDEMPOTENCY_KEY_LEGACY,
       JSON.stringify({ cartId, key } satisfies StoredCheckoutIdempotency),
     );
     return key;
@@ -56,19 +76,26 @@ export function getOrCreateCheckoutIdempotencyKey(cartId: string): string {
 
 export function clearCheckoutIdempotencyKey() {
   if (typeof window === 'undefined') return;
-  try {
-    sessionStorage.removeItem(CHECKOUT_IDEMPOTENCY_KEY);
-  } catch {
-    // ignore
-  }
+  removeStorageMigrating(
+    sessionStorage,
+    CHECKOUT_IDEMPOTENCY_KEY,
+    CHECKOUT_IDEMPOTENCY_KEY_LEGACY,
+  );
 }
 
 export function storePendingPayment(payload: PendingPayment) {
   if (typeof window === 'undefined') return;
-  sessionStorage.setItem(PENDING_PAYMENT_KEY, JSON.stringify(payload));
+  writeStorageMigrating(
+    sessionStorage,
+    PENDING_PAYMENT_KEY,
+    PENDING_PAYMENT_KEY_LEGACY,
+    JSON.stringify(payload),
+  );
   if (payload.guestAccessToken) {
-    sessionStorage.setItem(
+    writeStorageMigrating(
+      sessionStorage,
       GUEST_ORDER_TOKEN_KEY,
+      GUEST_ORDER_TOKEN_KEY_LEGACY,
       JSON.stringify({ orderId: payload.orderId, token: payload.guestAccessToken }),
     );
   }
@@ -77,7 +104,11 @@ export function storePendingPayment(payload: PendingPayment) {
 export function readPendingPayment(): PendingPayment | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = sessionStorage.getItem(PENDING_PAYMENT_KEY);
+    const raw = readStorageMigrating(
+      sessionStorage,
+      PENDING_PAYMENT_KEY,
+      PENDING_PAYMENT_KEY_LEGACY,
+    );
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PendingPayment;
     if (!parsed.orderId || !parsed.clientSecret) return null;
@@ -93,23 +124,81 @@ export function storeGuestOrderToken(
   orderNumber?: string | null,
 ) {
   if (typeof window === 'undefined') return;
-  sessionStorage.setItem(GUEST_ORDER_TOKEN_KEY, JSON.stringify({ orderId, token }));
+  writeStorageMigrating(
+    sessionStorage,
+    GUEST_ORDER_TOKEN_KEY,
+    GUEST_ORDER_TOKEN_KEY_LEGACY,
+    JSON.stringify({ orderId, token }),
+  );
   if (orderNumber) {
     try {
-      const raw = localStorage.getItem(GUEST_ORDER_TOKENS_KEY);
+      const raw = readStorageMigrating(
+        localStorage,
+        GUEST_ORDER_TOKENS_KEY,
+        GUEST_ORDER_TOKENS_KEY_LEGACY,
+      );
       const map = raw ? (JSON.parse(raw) as Record<string, string>) : {};
       map[orderNumber] = token;
-      localStorage.setItem(GUEST_ORDER_TOKENS_KEY, JSON.stringify(map));
+      writeStorageMigrating(
+        localStorage,
+        GUEST_ORDER_TOKENS_KEY,
+        GUEST_ORDER_TOKENS_KEY_LEGACY,
+        JSON.stringify(map),
+      );
     } catch {
       // ignore quota / private mode
     }
   }
 }
 
+export function removeGuestOrderToken(orderId: string, orderNumber?: string | null) {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = readStorageMigrating(
+      sessionStorage,
+      GUEST_ORDER_TOKEN_KEY,
+      GUEST_ORDER_TOKEN_KEY_LEGACY,
+    );
+    if (raw) {
+      const current = JSON.parse(raw) as { orderId?: string };
+      if (current.orderId === orderId) {
+        removeStorageMigrating(
+          sessionStorage,
+          GUEST_ORDER_TOKEN_KEY,
+          GUEST_ORDER_TOKEN_KEY_LEGACY,
+        );
+      }
+    }
+    if (orderNumber) {
+      const stored = readStorageMigrating(
+        localStorage,
+        GUEST_ORDER_TOKENS_KEY,
+        GUEST_ORDER_TOKENS_KEY_LEGACY,
+      );
+      if (stored) {
+        const tokens = JSON.parse(stored) as Record<string, string>;
+        delete tokens[orderNumber];
+        writeStorageMigrating(
+          localStorage,
+          GUEST_ORDER_TOKENS_KEY,
+          GUEST_ORDER_TOKENS_KEY_LEGACY,
+          JSON.stringify(tokens),
+        );
+      }
+    }
+  } catch {
+    // Ignore unavailable or malformed browser storage.
+  }
+}
+
 export function readGuestOrderToken(orderId?: string | null): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = sessionStorage.getItem(GUEST_ORDER_TOKEN_KEY);
+    const raw = readStorageMigrating(
+      sessionStorage,
+      GUEST_ORDER_TOKEN_KEY,
+      GUEST_ORDER_TOKEN_KEY_LEGACY,
+    );
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { orderId: string; token: string };
     if (!parsed.orderId || !parsed.token) return null;
@@ -123,7 +212,11 @@ export function readGuestOrderToken(orderId?: string | null): string | null {
 export function readGuestOrderTokenByNumber(orderNumber: string): string | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(GUEST_ORDER_TOKENS_KEY);
+    const raw = readStorageMigrating(
+      localStorage,
+      GUEST_ORDER_TOKENS_KEY,
+      GUEST_ORDER_TOKENS_KEY_LEGACY,
+    );
     if (!raw) return null;
     const map = JSON.parse(raw) as Record<string, string>;
     return map[orderNumber] ?? null;
@@ -134,7 +227,7 @@ export function readGuestOrderTokenByNumber(orderNumber: string): string | null 
 
 export function clearPendingPayment() {
   if (typeof window === 'undefined') return;
-  sessionStorage.removeItem(PENDING_PAYMENT_KEY);
+  removeStorageMigrating(sessionStorage, PENDING_PAYMENT_KEY, PENDING_PAYMENT_KEY_LEGACY);
   clearCheckoutIdempotencyKey();
 }
 

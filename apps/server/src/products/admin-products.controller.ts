@@ -63,4 +63,10 @@ export class AdminProductsController {
   remove(@Param('id') id: string) {
     return this.productsService.remove(id);
   }
+
+  @Post(':id/copy-to-market')
+  @Permissions('products.create')
+  copyToMarket(@Param('id') id: string, @Body() body: unknown) {
+    return this.productsService.copyToMarket(id, body);
+  }
 }

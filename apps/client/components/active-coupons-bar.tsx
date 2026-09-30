@@ -7,11 +7,15 @@ import { apiUrl } from '@/lib/api';
 import { getMessages } from '@/lib/messages';
 import type { ActiveCouponDto } from '@lumea/types';
 import { formatMoney } from '@lumea/utils';
+import {
+  COUPONS_BAR_DISMISS_KEY,
+  COUPONS_BAR_DISMISS_KEY_LEGACY,
+  readStorageMigrating,
+  writeStorageMigrating,
+} from '@/lib/storefront-cookies';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Tag, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-
-const DISMISS_KEY = 'lumea_coupons_bar_dismissed';
 
 export function ActiveCouponsBar() {
   const { currency } = useCurrency();
@@ -25,7 +29,13 @@ export function ActiveCouponsBar() {
 
   useEffect(() => {
     try {
-      setDismissed(sessionStorage.getItem(DISMISS_KEY) === '1');
+      setDismissed(
+        readStorageMigrating(
+          sessionStorage,
+          COUPONS_BAR_DISMISS_KEY,
+          COUPONS_BAR_DISMISS_KEY_LEGACY,
+        ) === '1',
+      );
     } catch {
       // ignore
     }
@@ -52,7 +62,12 @@ export function ActiveCouponsBar() {
   const dismiss = useCallback(() => {
     setDismissed(true);
     try {
-      sessionStorage.setItem(DISMISS_KEY, '1');
+      writeStorageMigrating(
+        sessionStorage,
+        COUPONS_BAR_DISMISS_KEY,
+        COUPONS_BAR_DISMISS_KEY_LEGACY,
+        '1',
+      );
     } catch {
       // ignore
     }

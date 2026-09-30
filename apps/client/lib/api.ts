@@ -32,6 +32,7 @@ const CATALOG_PREFIXES = [
   '/brands',
   '/merchandising',
   '/content/banners',
+  '/content/faq',
   '/journal',
   '/store/contact',
   '/store/coupons',

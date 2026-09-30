@@ -220,8 +220,9 @@ const sections: Section[] = [
             settings. USD/AED card → Stripe; TND → Konnect.
           </li>
           <li>
-            Configure COD / card toggles and provider secrets under Catalog → Store settings.
-            Tax (basis points) is added to shipping-inclusive totals and charged with the payment.
+            Configure COD / card toggles and provider secrets under System → Payments (or Settings
+            → Payments & secrets). Tax (basis points) is added to shipping-inclusive totals and
+            charged with the payment.
           </li>
           <li>
             COD orders show payment <code>AUTHORIZED</code> until you mark cash collected /
