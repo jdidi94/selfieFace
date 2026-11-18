@@ -37,7 +37,11 @@ COPY --from=build /app/apps/server/package.json ./package.json
 COPY --from=build /app/apps/server/prisma ./prisma
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/server/node_modules ./apps/server/node_modules
+# Preserve pnpm workspace symlink targets, compiled exports, and package dependencies.
+COPY --from=build /app/packages ./packages
 USER lumea
+# Fail the image build if the API's runtime dependencies cannot be resolved.
+RUN node -e "const r = require('node:module').createRequire('/app/apps/server/dist/main.js'); for (const name of Object.keys(require('/app/package.json').dependencies)) r.resolve(name); r('@lumea/validation');"
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:4000/api/health/live || exit 1
