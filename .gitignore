@@ -14,7 +14,9 @@ build
 .env
 .env.local
 .env.*.local
+.env.lightsail
 !.env.example
+!.env.lightsail.example
 
 # Prisma
 apps/server/prisma/*.db

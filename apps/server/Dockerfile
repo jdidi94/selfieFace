@@ -26,6 +26,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S lumea && adduser -S lumea -G lumea
+RUN mkdir -p /app/uploads && chown lumea:lumea /app/uploads
 COPY --from=build /app/apps/server/dist ./dist
 COPY --from=build /app/apps/server/package.json ./package.json
 COPY --from=build /app/apps/server/prisma ./prisma
