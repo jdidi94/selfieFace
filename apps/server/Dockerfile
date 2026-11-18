@@ -14,6 +14,7 @@ COPY packages/utils/package.json packages/utils/
 # Include their sources and schema before install so that postinstall can run.
 COPY packages/ packages/
 COPY apps/server/prisma/ apps/server/prisma/
+COPY scripts/ scripts/
 RUN pnpm install --frozen-lockfile --filter @lumea/server...
 
 FROM deps AS build
