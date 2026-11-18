@@ -1,7 +1,7 @@
 import { setRefreshCookie } from '@/lib/auth-cookies';
 import { getSafeAuthReturnPath } from '@/lib/auth-return';
 import { nestFetch } from '@/lib/nest-api';
-import type { AuthSession } from '@lumea/types';
+import { UserType, type AuthSession } from '@lumea/types';
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request) {
@@ -23,6 +23,9 @@ export async function GET(request: Request) {
   }
 
   const session = (await res.json()) as AuthSession;
+  if (!session.accessToken || session.user?.type !== UserType.CUSTOMER) {
+    return NextResponse.redirect(`${origin}/account/login?error=google`);
+  }
   const encodedReturnPath = request.headers
     .get('cookie')
     ?.split('; ')

@@ -4,6 +4,7 @@ import {
   ConfirmTypedDialog,
   typedConfirmToken,
 } from '@/components/confirm-typed-dialog';
+import { ContextualHelp } from '@/components/contextual-help';
 import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
 import { ProductPicker } from '@/components/product-picker';
@@ -468,7 +469,7 @@ export default function CouponsPage() {
             </div>
             {form.type === CouponType.PERCENT ? (
               <div className="space-y-2">
-                <Label htmlFor="percentOff">Percent off</Label>
+                <Label htmlFor="percentOff">Percent off <ContextualHelp fieldKey="coupons.discount" /></Label>
                 <Input
                   id="percentOff"
                   type="number"
@@ -480,7 +481,7 @@ export default function CouponsPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                <Label htmlFor="amountOff">Amount off ({currency}, minor units)</Label>
+                <Label htmlFor="amountOff">Amount off ({currency}, minor units) <ContextualHelp fieldKey="coupons.discount" /></Label>
                 <Input
                   id="amountOff"
                   value={form.amountOff}

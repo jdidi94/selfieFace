@@ -87,7 +87,7 @@ export class CartService {
       where: { id: parsed.data.variantId },
       include: { product: true, prices: true },
     });
-    if (!variant || !variant.isActive || variant.product.status !== ProductStatus.ACTIVE) {
+    if (!variant || !variant.isActive || variant.product.status !== ProductStatus.ACTIVE || variant.product.isIncoming) {
       throw new BadRequestException('Variant is not available');
     }
     const sellable = await getSellableStock(this.prisma, variant.id);
@@ -130,6 +130,9 @@ export class CartService {
     const cart = await this.assertCartAccess(cartId, opts);
     const item = cart.items.find((i) => i.id === itemId);
     if (!item) throw new NotFoundException('Cart item not found');
+    if (item.variant.product.isIncoming) {
+      throw new BadRequestException('This item is not available to purchase yet');
+    }
     if (parsed.data.quantity > item.variant.stock) {
       throw new BadRequestException('Not enough stock for this item');
     }
@@ -354,7 +357,17 @@ export class CartService {
         item.variant.product.translations.find((t) => t.locale === 'en') ??
         item.variant.product.translations[0];
       const productName = translation?.name ?? item.variant.product.name;
-
+      if (item.variant.product.isIncoming) {
+        adjustments.push({
+          itemId: item.id,
+          productName,
+          previousQuantity: item.quantity,
+          quantity: 0,
+          removed: true,
+        });
+        ops.push(this.prisma.cartItem.delete({ where: { id: item.id } }));
+        continue;
+      }
       if (stock <= 0) {
         adjustments.push({
           itemId: item.id,

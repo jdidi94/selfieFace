@@ -9,10 +9,18 @@ const LOCALE_BY_CURRENCY: Record<string, string> = {
  * Example: formatMoney(4250, 'USD') => "$42.50"
  */
 export function formatMoney(amount: number, currency = 'USD', locale?: string): string {
-  return new Intl.NumberFormat(locale ?? LOCALE_BY_CURRENCY[currency] ?? 'en-US', {
-    style: 'currency',
-    currency,
-  }).format(amount / 100);
+  const resolvedLocale = locale ?? LOCALE_BY_CURRENCY[currency] ?? 'en-US';
+  if (resolvedLocale.startsWith('ar')) {
+    const shorthand: Record<string, string> = { TND: 'د.ت', AED: 'د.إ', USD: 'د.أ' };
+    const number = new Intl.NumberFormat(resolvedLocale, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount / 100);
+    return `${number} ${shorthand[currency] ?? currency}`;
+  }
+  return new Intl.NumberFormat(resolvedLocale, { style: 'currency', currency }).format(
+    amount / 100,
+  );
 }
 
 /** Rough region → currency defaults for storefront detection. */

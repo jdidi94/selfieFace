@@ -42,9 +42,13 @@ export class BrandsService {
       this.catalogCache.key(marketCode, CACHE_PREFIX.brands, lang),
       async () => {
         const rows = await this.prisma.brand.findMany({
-          where: { marketId: market.id },
+          where: {
+            marketId: market.id,
+            isActive: true,
+            products: { some: { marketId: market.id, status: 'ACTIVE', variants: { some: { isActive: true } } } },
+          },
           include: { translations: true },
-          orderBy: { name: 'asc' },
+          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
         });
         return rows.map((row) => mapBrand(row, lang));
       },
@@ -78,11 +82,11 @@ export class BrandsService {
             }
           : {}),
       },
-      include: { translations: true },
-      orderBy: { name: 'asc' },
+      include: { translations: true, _count: { select: { products: true } } },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       take: term ? take : undefined,
     });
-    return rows.map((row) => mapBrand(row, SharedLocale.EN, true));
+    return rows.map((row) => ({ ...mapBrand(row, SharedLocale.EN, true), productCount: row._count.products }));
   }
 
   async create(input: unknown, marketCode: MarketCode | string = MarketCode.OTHER) {
@@ -99,6 +103,8 @@ export class BrandsService {
           slug,
           description: copy.description,
           imageUrl: parsed.data.imageUrl ?? null,
+          sortOrder: parsed.data.sortOrder ?? 0,
+          isActive: parsed.data.isActive ?? true,
           marketId: market.id,
           translations: {
             create: copy.translations.map((t) => ({
@@ -149,6 +155,8 @@ export class BrandsService {
             ...(parsed.data.imageUrl !== undefined
               ? { imageUrl: parsed.data.imageUrl }
               : {}),
+            ...(parsed.data.sortOrder !== undefined ? { sortOrder: parsed.data.sortOrder } : {}),
+            ...(parsed.data.isActive !== undefined ? { isActive: parsed.data.isActive } : {}),
           },
         });
 
@@ -228,6 +236,8 @@ export class BrandsService {
         slug: existing.slug,
         description: existing.description,
         imageUrl: existing.imageUrl,
+        sortOrder: existing.sortOrder,
+        isActive: existing.isActive,
         marketId: target.id,
         translations: {
           create: existing.translations.map((t) => ({

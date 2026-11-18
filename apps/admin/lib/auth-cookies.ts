@@ -1,6 +1,6 @@
 import type { NextResponse } from 'next/server';
 
-export const REFRESH_COOKIE = 'refreshToken';
+export const REFRESH_COOKIE = 'lumea_admin_refresh';
 export const ADMIN_SESSION_COOKIE = 'admin_session';
 const MAX_AGE = 60 * 60 * 24 * 7;
 

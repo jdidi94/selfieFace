@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  Currency,
   InventoryReason,
   OrderStatus,
   OrderTimelineActorType,
@@ -28,11 +29,13 @@ import {
 } from '@lumea/validation';
 import Stripe from 'stripe';
 import { LoyaltyService } from '../loyalty/loyalty.service';
+import { CatalogCacheService } from '../common/cache/catalog-cache.service';
 import { MarketsService } from '../markets/markets.service';
 import { parseMarketCode } from '../markets/market.util';
 import { OrderMailHelper } from '../mail/order-mail.helper';
 import { PrismaService } from '../prisma/prisma.service';
 import { restockFromAllocations } from '../inventory/warehouse-stock.util';
+import { syncPackStockForComponents } from '../products/pack-stock.util';
 import { computeOrderRefundPreview } from './refund-policy.util';
 import { StockNotifyService } from './stock-notify.service';
 import { StoreSettingsService } from './store-settings.service';
@@ -85,6 +88,7 @@ export class OrdersService {
     private readonly loyaltyService: LoyaltyService,
     private readonly marketsService: MarketsService,
     private readonly settingsService: StoreSettingsService,
+    private readonly catalogCache: CatalogCacheService,
   ) {
     const key = process.env.STRIPE_SECRET_KEY;
     if (key) this.stripe = new Stripe(key);
@@ -498,6 +502,19 @@ export class OrdersService {
     );
   }
 
+  async expireUnpaidStockHold(id: string): Promise<void> {
+    const order = await this.prisma.order.findUnique({
+      where: { id },
+      select: { status: true, paymentStatus: true, stockHoldExpiresAt: true },
+    });
+    if (
+      !order || order.status !== OrderStatus.PENDING ||
+      order.paymentStatus !== PaymentStatus.UNPAID ||
+      !order.stockHoldExpiresAt || order.stockHoldExpiresAt > new Date()
+    ) return;
+    await this.cancelOrderInternal(id, OrderTimelineActorType.SYSTEM, 'Checkout stock hold expired');
+  }
+
   async refundByAdmin(id: string, input: unknown): Promise<AdminOrderDto> {
     const parsed = orderRefundSchema.safeParse(input ?? {});
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
@@ -577,6 +594,7 @@ export class OrdersService {
     );
 
     await this.notifyStockAvailable(restocks);
+    if (restocks.length) await this.catalogCache.invalidateCatalog();
 
     await this.loyaltyService.reverseForOrder(id);
 
@@ -637,21 +655,32 @@ export class OrdersService {
     } else if (order.paymentStatus === PaymentStatus.AUTHORIZED) {
       nextPaymentStatus = PaymentStatus.UNPAID;
     } else if (order.paymentStatus === PaymentStatus.UNPAID && order.stripePaymentIntentId) {
-      await this.stripeCancelPaymentIntent(order.stripePaymentIntentId);
+      await this.stripeCancelPaymentIntent(order.stripePaymentIntentId, order.currency);
+    }
+    if (actor === OrderTimelineActorType.SYSTEM && note === 'Checkout stock hold expired') {
+      nextPaymentStatus = PaymentStatus.FAILED;
     }
 
     let restocks: RestockNotify[] = [];
+    let cancelled = false;
     await this.prisma.$transaction(
       async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Order" WHERE "id" = ${id} FOR UPDATE`;
         const current = await tx.order.findUniqueOrThrow({
           where: { id },
           include: orderItemsInclude,
         });
         if (current.status === OrderStatus.CANCELLED) return;
+        if (
+          actor === OrderTimelineActorType.SYSTEM && note === 'Checkout stock hold expired' &&
+          (current.status !== OrderStatus.PENDING || current.paymentStatus !== PaymentStatus.UNPAID ||
+            !current.stockHoldExpiresAt || current.stockHoldExpiresAt > new Date())
+        ) return;
 
         if (
           current.paymentStatus === PaymentStatus.CAPTURED ||
-          current.paymentStatus === PaymentStatus.AUTHORIZED
+          current.paymentStatus === PaymentStatus.AUTHORIZED ||
+          current.items.some((item) => item.allocations.length > 0)
         ) {
           restocks = await this.restockOrderItems(current, tx);
         }
@@ -662,6 +691,7 @@ export class OrdersService {
           data: {
             status: OrderStatus.CANCELLED,
             paymentStatus: nextPaymentStatus,
+            stockHoldExpiresAt: null,
             guestAccessToken: null,
             ...(refundId
               ? {
@@ -672,6 +702,7 @@ export class OrdersService {
               : {}),
           },
         });
+        cancelled = true;
         await this.recordTimelineEvent(
           id,
           OrderStatus.CANCELLED,
@@ -686,7 +717,10 @@ export class OrdersService {
       { maxWait: 10_000, timeout: 20_000 },
     );
 
+    if (!cancelled) return this.getAdmin(id);
+
     await this.notifyStockAvailable(restocks);
+    if (restocks.length) await this.catalogCache.invalidateCatalog();
 
     await this.loyaltyService.reverseForOrder(id);
 
@@ -743,16 +777,19 @@ export class OrdersService {
     }
   }
 
-  private async stripeCancelPaymentIntent(paymentIntentId: string): Promise<void> {
-    if (!this.stripe) return;
+  private async stripeCancelPaymentIntent(paymentIntentId: string, currency: Currency): Promise<void> {
     try {
-      const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId);
+      const settings = await this.settingsService.getByCurrency(currency);
+      const secret = this.settingsService.resolveStripeSecret(settings);
+      if (!secret) return;
+      const stripe = new Stripe(secret);
+      const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
       if (
         intent.status === 'requires_payment_method' ||
         intent.status === 'requires_confirmation' ||
         intent.status === 'requires_action'
       ) {
-        await this.stripe.paymentIntents.cancel(paymentIntentId);
+        await stripe.paymentIntents.cancel(paymentIntentId);
       }
     } catch {
       // Best-effort: order cancel should still proceed
@@ -771,33 +808,47 @@ export class OrdersService {
     tx: Prisma.TransactionClient,
   ): Promise<RestockNotify[]> {
     const restocks: RestockNotify[] = [];
+    const grouped = new Map<string, Map<string, number>>();
+    const legacyItems: typeof order.items = [];
     for (const item of order.items) {
-      const existing = await tx.inventoryMovement.findFirst({
-        where: {
-          variantId: item.variantId,
-          note: { contains: order.number },
-          reason: InventoryReason.RESTOCK,
-        },
+      if (!item.allocations.length) {
+        legacyItems.push(item);
+        continue;
+      }
+      for (const allocation of item.allocations) {
+        const byWarehouse = grouped.get(allocation.variantId) ?? new Map<string, number>();
+        byWarehouse.set(allocation.warehouseId, (byWarehouse.get(allocation.warehouseId) ?? 0) + allocation.quantity);
+        grouped.set(allocation.variantId, byWarehouse);
+      }
+    }
+
+    const alreadyRestocked = async (variantId: string) => Boolean(await tx.inventoryMovement.findFirst({
+      where: { variantId, note: { contains: order.number }, reason: InventoryReason.RESTOCK },
+      select: { id: true },
+    }));
+    for (const [variantId, byWarehouse] of grouped) {
+      if (await alreadyRestocked(variantId)) continue;
+      const allocations = [...byWarehouse].map(([warehouseId, quantity]) => ({ warehouseId, quantity }));
+      const { previousAggregate, nextAggregate } = await restockFromAllocations(tx, {
+        variantId,
+        quantity: allocations.reduce((sum, allocation) => sum + allocation.quantity, 0),
+        note: `Restock ${order.number}`,
+        allocations,
       });
-      if (existing) continue;
+      restocks.push({ variantId, previousStock: previousAggregate, nextStock: nextAggregate });
+    }
 
-      const allocations = item.allocations.map((a) => ({
-        warehouseId: a.warehouseId,
-        quantity: a.quantity,
-      }));
-
+    for (const item of legacyItems) {
+      if (await alreadyRestocked(item.variantId)) continue;
       const { previousAggregate, nextAggregate } = await restockFromAllocations(tx, {
         variantId: item.variantId,
         quantity: item.quantity,
         note: `Restock ${order.number}`,
-        allocations,
+        allocations: [],
       });
-      restocks.push({
-        variantId: item.variantId,
-        previousStock: previousAggregate,
-        nextStock: nextAggregate,
-      });
+      restocks.push({ variantId: item.variantId, previousStock: previousAggregate, nextStock: nextAggregate });
     }
+    await syncPackStockForComponents(tx, restocks.map((row) => row.variantId));
     return restocks;
   }
 

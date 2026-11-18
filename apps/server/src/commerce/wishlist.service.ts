@@ -119,6 +119,7 @@ export class WishlistService {
         name: string;
         slug: string;
         status: ProductStatus;
+        isIncoming: boolean;
         translations: { locale: string; name: string }[];
         images: { media: { url: string } }[];
         variants: {
@@ -150,7 +151,8 @@ export class WishlistService {
       .map((p) => p!.compareAtAmount)
       .filter((n): n is number => n != null);
     const compareAtFrom = compareAts.length ? Math.min(...compareAts) : null;
-    const inStock = activeVariants.some((v) => v.stock > 0);
+    const isIncoming = item.product.isIncoming;
+    const inStock = !isIncoming && activeVariants.some((v) => v.stock > 0);
 
     return {
       id: item.id,
@@ -167,6 +169,7 @@ export class WishlistService {
             ? SharedCurrency.AED
             : SharedCurrency.USD,
       inStock,
+      isIncoming,
       defaultVariantId,
       createdAt: item.createdAt.toISOString(),
     };

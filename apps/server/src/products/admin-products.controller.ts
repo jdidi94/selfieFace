@@ -17,6 +17,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { UserTypesGuard } from '../auth/guards/user-types.guard';
 import { AdminMarketCode } from '../markets/admin-market.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/auth.types';
 import { ProductsService } from './products.service';
 
 @Controller('admin/products')
@@ -40,6 +42,18 @@ export class AdminProductsController {
     return this.productsService.bulkTags(body);
   }
 
+  @Post('bulk-update/preview')
+  @Permissions('products.update')
+  previewBulkUpdate(@Body() body: unknown, @AdminMarketCode() market: MarketCode) {
+    return this.productsService.previewBulkUpdate(body, market);
+  }
+
+  @Post('bulk-update/apply')
+  @Permissions('products.update')
+  applyBulkUpdate(@Body() body: unknown, @AdminMarketCode() market: MarketCode, @CurrentUser() user: RequestUser) {
+    return this.productsService.applyBulkUpdate(body, market, user.sub);
+  }
+
   @Get(':id')
   @Permissions('products.read')
   get(@Param('id') id: string, @AdminMarketCode() market: MarketCode) {
@@ -54,8 +68,8 @@ export class AdminProductsController {
 
   @Patch(':id')
   @Permissions('products.update')
-  update(@Param('id') id: string, @Body() body: unknown) {
-    return this.productsService.update(id, body);
+  update(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: RequestUser) {
+    return this.productsService.update(id, body, user.sub);
   }
 
   @Delete(':id')

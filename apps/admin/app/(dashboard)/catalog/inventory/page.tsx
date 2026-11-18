@@ -1,6 +1,8 @@
 'use client';
 
 import { FormErrorBanner } from '@/components/form-errors';
+import { ContextualHelp } from '@/components/contextual-help';
+import { SavedFilters } from '@/components/saved-filters';
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminMarket } from '@/lib/market-context';
@@ -48,6 +50,8 @@ export default function InventoryPage() {
   const [toWarehouseId, setToWarehouseId] = useState('');
   const [transferQty, setTransferQty] = useState('1');
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [lowOnly, setLowOnly] = useState(false);
 
   async function load() {
     if (!accessToken) return;
@@ -144,6 +148,10 @@ export default function InventoryPage() {
 
   const lowCount = items.filter((item) => item.stock <= threshold).length;
   const activeWarehouses = warehouses.filter((w) => w.isActive);
+  const visibleItems = items.filter((item) => {
+    const matchesSearch = `${item.product.name} ${item.name} ${item.sku}`.toLowerCase().includes(search.trim().toLowerCase());
+    return matchesSearch && (!lowOnly || item.stock <= threshold);
+  });
 
   return (
     <div className="space-y-6">
@@ -160,6 +168,19 @@ export default function InventoryPage() {
         {lowCount > 0 ? <Badge variant="accent">{lowCount} low stock</Badge> : null}
       </div>
 
+      <div className="flex flex-wrap items-center gap-3">
+        <Input className="max-w-sm" placeholder="Search product, variant, or SKU" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={lowOnly} onChange={(event) => setLowOnly(event.target.checked)} />Low stock only</label>
+      </div>
+      <SavedFilters
+        entity="INVENTORY"
+        value={{ q: search, lowStock: String(lowOnly) }}
+        onApply={(filters) => {
+          setSearch(filters.q ?? '');
+          setLowOnly(filters.lowStock === 'true');
+        }}
+      />
+
       <div className="rounded-lg border border-border bg-surface">
         <Table>
           <TableHeader>
@@ -173,7 +194,7 @@ export default function InventoryPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {items.map((item) => {
+            {visibleItems.map((item) => {
               const low = item.stock <= threshold;
               return (
                 <TableRow key={item.id}>
@@ -243,7 +264,7 @@ export default function InventoryPage() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Quantity delta (+/-)</Label>
+                  <Label>Quantity delta (+/-) <ContextualHelp fieldKey="inventory.adjustment" /></Label>
                   <Input value={delta} onChange={(e) => setDelta(e.target.value)} />
                 </div>
               </>

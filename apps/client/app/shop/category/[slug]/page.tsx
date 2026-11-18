@@ -41,6 +41,10 @@ function parseFilters(
   const kindRaw = first(params.kind) ?? '';
   return {
     q: first(params.q) ?? '',
+    department: first(params.department) ?? '',
+    productType: first(params.productType) ?? '',
+    concern: first(params.concern) ?? '',
+    ingredient: first(params.ingredient) ?? '',
     category: categorySlug,
     problemCategory: first(params.problemCategory) ?? '',
     brand: first(params.brand) ?? '',

@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { User, UserType } from '@prisma/client';
+import { Prisma, User, UserType } from '@prisma/client';
 import {
   AdminRole as SharedAdminRole,
   UserType as SharedUserType,
@@ -169,21 +169,22 @@ export class AuthService {
     }
 
     const tokenHash = this.hashToken(parsed.data.refreshToken);
-    const stored = await this.prisma.refreshToken.findUnique({
-      where: { tokenHash },
-      include: { user: true },
-    });
-
-    if (!stored || stored.revokedAt || stored.expiresAt < new Date()) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
-      data: { revokedAt: new Date() },
-    });
-
-    return this.createSession(stored.user);
+    return this.prisma.$transaction(async (tx) => {
+      const stored = await tx.refreshToken.findUnique({
+        where: { tokenHash },
+        include: { user: true },
+      });
+      if (!stored || stored.revokedAt || stored.expiresAt <= new Date()) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+      this.assertNotBlocked(stored.user);
+      const consumed = await tx.refreshToken.updateMany({
+        where: { id: stored.id, revokedAt: null, expiresAt: { gt: new Date() } },
+        data: { revokedAt: new Date() },
+      });
+      if (consumed.count !== 1) throw new UnauthorizedException('Invalid refresh token');
+      return this.createSession(stored.user, tx);
+    }, { maxWait: 10_000, timeout: 20_000 });
   }
 
   async logout(refreshToken?: string): Promise<{ success: true }> {
@@ -405,7 +406,7 @@ export class AuthService {
     return raw;
   }
 
-  private async createSession(user: User): Promise<AuthSession> {
+  private async createSession(user: User, db: Prisma.TransactionClient | PrismaService = this.prisma): Promise<AuthSession> {
     this.assertNotBlocked(user);
 
     const refreshToken = randomBytes(48).toString('hex');
@@ -413,7 +414,7 @@ export class AuthService {
     const refreshDays = Number(process.env.JWT_REFRESH_EXPIRES_DAYS ?? 7);
     const expiresAt = new Date(Date.now() + refreshDays * 24 * 60 * 60 * 1000);
 
-    await this.prisma.refreshToken.create({
+    await db.refreshToken.create({
       data: { userId: user.id, tokenHash, expiresAt },
     });
 

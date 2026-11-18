@@ -2,6 +2,7 @@
 
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { SavedFilters } from '@/components/saved-filters';
 import {
   Badge,
   Button,
@@ -157,6 +158,16 @@ export default function OrdersPage() {
           Search
         </button>
       </div>
+
+      <SavedFilters
+        entity="ORDERS"
+        value={{ q: search, status }}
+        onApply={(filters) => {
+          setQ(filters.q ?? '');
+          setSearch(filters.q ?? '');
+          setStatus(filters.status || 'all');
+        }}
+      />
 
       {actionMessage ? <p role="status" className="text-sm text-muted-foreground">{actionMessage}</p> : null}
       {selectedIds.length > 0 ? (

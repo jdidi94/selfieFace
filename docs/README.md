@@ -13,6 +13,7 @@ Phase 0 product definition for the beauty e-commerce platform. These documents l
 | [MEDIA_README.md](./MEDIA_README.md) | Selfieface media types, sizes, and asset prep checklist |
 | [PENDING_UX_SCALE_TASKS.md](./PENDING_UX_SCALE_TASKS.md) | Spec-only backlog: admin validation, humanized errors, shop filters/search, footer contact, journal media, large-catalog loading |
 | [PENDING_FEATURES.md](./PENDING_FEATURES.md) | Remaining enhancements (SEO/content, address book, admin polish, reliability, SES mail status, later wishlist/loyalty) |
+| [ADMIN_STOREFRONT_IMPROVEMENTS_PLAN.md](./ADMIN_STOREFRONT_IMPROVEMENTS_PLAN.md) | Planned filter, image loading, carousel, contextual help, and admin notification improvements |
 
 Design tokens and shared UI components live in `@lumea/ui` (`packages/ui/src/styles/tokens.css`).
 

@@ -14,7 +14,7 @@ import {
   readCookieMigrating,
   writeCookieMigrating,
 } from '@/lib/storefront-cookies';
-import type { CartDto, CartStockAdjustmentDto } from '@lumea/types';
+import { UserType, type CartDto, type CartStockAdjustmentDto } from '@lumea/types';
 import {
   createContext,
   useCallback,
@@ -39,7 +39,7 @@ type CartContextValue = {
   error: string | null;
   stockAdjustments: CartStockAdjustmentDto[];
   clearStockAdjustments: () => void;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<CartDto | null>;
   addItem: (variantId: string, quantity?: number) => Promise<void>;
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
@@ -59,12 +59,7 @@ function ensureGuestToken() {
   );
   if (!token) {
     token = crypto.randomUUID().replace(/-/g, '');
-    writeCookieMigrating(
-      GUEST_TOKEN_COOKIE,
-      GUEST_TOKEN_COOKIE_LEGACY,
-      token,
-      CART_COOKIE_MAX_AGE,
-    );
+    writeCookieMigrating(GUEST_TOKEN_COOKIE, GUEST_TOKEN_COOKIE_LEGACY, token, CART_COOKIE_MAX_AGE);
   }
   return token;
 }
@@ -114,7 +109,7 @@ function CartAddFeedbackBar({ feedback }: { feedback: AddFeedback | null }) {
 }
 
 export function CartProvider({ children }: { children: ReactNode }) {
-  const { accessToken } = useAuth();
+  const { accessToken, user, loading: authLoading } = useAuth();
   const { currency } = useCurrency();
   const { locale } = useLocale();
   const t = getMessages(locale);
@@ -125,6 +120,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const [addFeedback, setAddFeedback] = useState<AddFeedback | null>(null);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cartRef = useRef<CartDto | null>(null);
+  const refreshSequence = useRef(0);
+  const refreshInFlight = useRef<{ headers: typeof cartHeaders; currency: string; promise: Promise<CartDto | null> } | null>(null);
 
   useEffect(() => {
     cartRef.current = cart;
@@ -154,17 +151,15 @@ export function CartProvider({ children }: { children: ReactNode }) {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
-    const cartId = readCookieMigrating(
-      CART_ID_COOKIE,
-      CART_ID_COOKIE_LEGACY,
-      CART_COOKIE_MAX_AGE,
-    );
+    const cartId = readCookieMigrating(CART_ID_COOKIE, CART_ID_COOKIE_LEGACY, CART_COOKIE_MAX_AGE);
     const guestToken = ensureGuestToken();
     if (cartId) headers['x-cart-id'] = cartId;
     headers['x-guest-token'] = guestToken;
-    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    if (accessToken && user?.type === UserType.CUSTOMER) {
+      headers.Authorization = `Bearer ${accessToken}`;
+    }
     return headers;
-  }, [accessToken]);
+  }, [accessToken, user?.type]);
 
   const applyCart = useCallback((next: CartDto) => {
     setCart(next);
@@ -178,30 +173,51 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setStockAdjustments([]);
   }, []);
 
-  const refresh = useCallback(async () => {
-    try {
-      const res = await fetch(`${apiUrl}/cart?currency=${currency}`, {
-        headers: cartHeaders(),
-      });
-      if (!res.ok) {
-        setCart(null);
+  const refresh = useCallback((): Promise<CartDto | null> => {
+    const current = refreshInFlight.current;
+    if (current?.headers === cartHeaders && current.currency === currency) return current.promise;
+    const request = (async () => {
+      const sequence = ++refreshSequence.current;
+      try {
+        const res = await fetch(`${apiUrl}/cart?currency=${currency}`, {
+          headers: cartHeaders(),
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) {
+          if (sequence !== refreshSequence.current) return null;
+          // Keep the last confirmed cart visible during a transient API failure.
+          // Clearing it here makes a network blip look like the shopper's bag was lost.
+          setError('unavailable');
+          return null;
+        }
+        const data = (await res.json()) as CartDto;
+        if (sequence !== refreshSequence.current) return null;
+        setError(null);
+        applyCart(data);
+        return data;
+      } catch {
+        if (sequence !== refreshSequence.current) return null;
+        // Preserve the last confirmed cart so checkout can recover on retry.
         setError('unavailable');
-        return;
+        return null;
       }
-      const data = (await res.json()) as CartDto;
-      setError(null);
-      applyCart(data);
-    } catch {
-      setCart(null);
-      setError('unavailable');
-    }
-  }, [apiUrl, applyCart, cartHeaders, currency]);
+    })();
+    refreshInFlight.current = { headers: cartHeaders, currency, promise: request };
+    void request.finally(() => {
+      if (refreshInFlight.current?.promise === request) refreshInFlight.current = null;
+    });
+    return request;
+  }, [applyCart, cartHeaders, currency]);
 
   useEffect(() => {
-    void refresh().finally(() => setLoading(false));
-  }, [refresh]);
+    if (authLoading) return;
+    let active = true;
+    void refresh().finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [authLoading, refresh]);
 
   useEffect(() => {
+    if (authLoading) return;
     function onVisibility() {
       if (document.visibilityState === 'visible') {
         void refresh();
@@ -209,7 +225,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [refresh]);
+  }, [authLoading, refresh]);
 
   const addItem = useCallback(
     async (variantId: string, quantity = 1) => {
@@ -232,9 +248,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
         if (!res.ok) {
           const err = (await res.json().catch(() => ({}))) as { message?: string };
           const message =
-            typeof err.message === 'string' && err.message.trim()
-              ? err.message
-              : t.addToBagError;
+            typeof err.message === 'string' && err.message.trim() ? err.message : t.addToBagError;
           throw new Error(message);
         }
         applyCart((await res.json()) as CartDto);
@@ -287,9 +301,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(
-          typeof err.message === 'string' ? err.message : 'Could not apply coupon',
-        );
+        throw new Error(typeof err.message === 'string' ? err.message : 'Could not apply coupon');
       }
       applyCart((await res.json()) as CartDto);
     },
@@ -316,9 +328,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       });
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(
-          typeof err.message === 'string' ? err.message : 'Could not redeem points',
-        );
+        throw new Error(typeof err.message === 'string' ? err.message : 'Could not redeem points');
       }
       applyCart((await res.json()) as CartDto);
     },

@@ -1,6 +1,6 @@
 import { setRefreshCookie } from '@/lib/auth-cookies';
 import { nestFetch, nestJson } from '@/lib/nest-api';
-import type { AuthSession } from '@lumea/types';
+import { UserType, type AuthSession } from '@lumea/types';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -20,6 +20,13 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { message: (data as { message?: string }).message ?? 'Login failed' },
       { status: 502 },
+    );
+  }
+
+  if (session.user.type !== UserType.CUSTOMER) {
+    return NextResponse.json(
+      { message: 'Customer access only. Use the admin dashboard to sign in as an administrator.' },
+      { status: 403 },
     );
   }
 

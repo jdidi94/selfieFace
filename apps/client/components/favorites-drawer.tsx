@@ -78,7 +78,7 @@ export function FavoritesDrawer() {
   }
 
   function addToBag(item: WishlistItemDto) {
-    if (!item.defaultVariantId || !item.inStock) return;
+    if (!item.defaultVariantId || !item.inStock || item.isIncoming) return;
     openBag();
     void addItem(item.defaultVariantId, 1).catch(() => {
       // Feedback bar handles error messaging.
@@ -136,7 +136,7 @@ export function FavoritesDrawer() {
                     </LocaleLink>
                     <p className="text-sm">{formatMoney(item.priceFrom, item.currency)}</p>
                     <div className="flex flex-wrap gap-2">
-                      {item.defaultVariantId && item.inStock ? (
+                      {item.defaultVariantId && item.inStock && !item.isIncoming ? (
                         <Button size="sm" onClick={() => addToBag(item)}>
                           {t.addToBag}
                         </Button>

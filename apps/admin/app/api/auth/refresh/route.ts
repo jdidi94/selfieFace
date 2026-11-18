@@ -20,7 +20,7 @@ export async function POST() {
   const data = await nestJson<AuthSession>(res);
   if (!res.ok) {
     const response = NextResponse.json(data, { status: res.status });
-    clearAuthCookies(response);
+    if (res.status === 401 || res.status === 403) clearAuthCookies(response);
     return response;
   }
 
@@ -30,7 +30,6 @@ export async function POST() {
       { message: (data as { message?: string }).message ?? 'Session refresh failed' },
       { status: 502 },
     );
-    clearAuthCookies(response);
     return response;
   }
 

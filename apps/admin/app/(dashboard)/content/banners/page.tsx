@@ -402,14 +402,16 @@ export default function BannersPage() {
                   </Button>
                 ) : null}
               </div>
-              {imagePreview ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={imagePreview}
-                  alt=""
-                  className="mt-2 aspect-[16/9] w-full max-w-md rounded-md border border-border object-cover"
-                />
-              ) : null}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imagePreview ?? '/images/defaults/banner.webp'}
+                alt=""
+                className="mt-2 aspect-[16/9] w-full max-w-md rounded-md border border-border object-cover"
+                onError={(event) => {
+                  event.currentTarget.src = '/images/defaults/banner.webp';
+                  event.currentTarget.onerror = null;
+                }}
+              />
               <Input
                 value={form.imageMediaId}
                 onChange={(e) => setForm((f) => ({ ...f, imageMediaId: e.target.value }))}

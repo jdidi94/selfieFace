@@ -6,7 +6,7 @@ import { fetchApi } from '@/lib/api';
 import { useCurrency } from '@/lib/currency-context';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
-import type { ProductListResponse } from '@lumea/types';
+import type { CatalogBrand, CatalogCategory, CatalogTaxonomy, ProductListResponse } from '@lumea/types';
 import { EmptyState, ErrorState, Input, LoadingState, Pagination, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@lumea/ui';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
@@ -25,6 +25,9 @@ export default function SearchPage() {
   const [data, setData] = useState<ProductListResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [apiDown, setApiDown] = useState(false);
+  const [taxonomy, setTaxonomy] = useState<CatalogTaxonomy>({ departments: [], productTypes: [], concerns: [], ingredients: [] });
+  const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [brands, setBrands] = useState<CatalogBrand[]>([]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -34,10 +37,28 @@ export default function SearchPage() {
     return () => window.clearTimeout(timer);
   }, [q]);
 
-  const load = useCallback(async () => {
+  // Filter metadata depends on market/language, not each search or page change.
+  useEffect(() => {
+    const controller = new AbortController();
+    const options = { next: { revalidate: 0 }, signal: controller.signal };
+    void Promise.all([
+      fetchApi<CatalogTaxonomy>(`/taxonomy?locale=${locale}&currency=${currency}`, options),
+      fetchApi<CatalogCategory[]>(`/categories?locale=${locale}&currency=${currency}`, options),
+      fetchApi<CatalogBrand[]>(`/brands?locale=${locale}&currency=${currency}`, options),
+    ]).then(([taxonomyResult, categoryResult, brandResult]) => {
+      if (controller.signal.aborted) return;
+      setTaxonomy(taxonomyResult);
+      setCategories(categoryResult);
+      setBrands(brandResult);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [locale, currency]);
+
+  const load = useCallback(async (signal?: AbortSignal) => {
     if (!debouncedQ) {
       setData(null);
       setApiDown(false);
+      setLoading(false);
       return;
     }
     setLoading(true);
@@ -52,23 +73,36 @@ export default function SearchPage() {
     });
     try {
       const result = await fetchApi<ProductListResponse>(`/products?${params.toString()}`, {
-        next: { revalidate: 0 },
+        next: { revalidate: 0 }, signal,
       });
+      if (signal?.aborted) return;
       setData(result);
       setApiDown(false);
     } catch {
+      if (signal?.aborted) return;
       setData(null);
       setApiDown(true);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [debouncedQ, currency, locale, page, sort, order]);
 
   useEffect(() => {
-    void load();
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
   }, [load]);
 
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const term = debouncedQ.toLocaleLowerCase();
+  const matches = [
+    { label: t.departmentLabel, items: taxonomy.departments.filter((item) => item.name.toLocaleLowerCase().includes(term)).map((item) => ({ name: item.name, href: `/shop?department=${encodeURIComponent(item.slug)}` })) },
+    { label: t.productTypeLabel, items: taxonomy.productTypes.filter((item) => item.name.toLocaleLowerCase().includes(term)).map((item) => ({ name: item.name, href: `/shop?productType=${encodeURIComponent(item.slug)}` })) },
+    { label: t.shopByConcern, items: taxonomy.concerns.filter((item) => item.name.toLocaleLowerCase().includes(term)).map((item) => ({ name: item.name, href: `/shop?concern=${encodeURIComponent(item.slug)}` })) },
+    { label: t.ingredientLabel, items: taxonomy.ingredients.filter((item) => item.name.toLocaleLowerCase().includes(term)).map((item) => ({ name: item.name, href: `/shop?ingredient=${encodeURIComponent(item.slug)}` })) },
+    { label: t.category, items: categories.filter((item) => item.name.toLocaleLowerCase().includes(term)).map((item) => ({ name: item.name, href: `/shop?category=${encodeURIComponent(item.slug)}` })) },
+    { label: t.brand, items: brands.filter((item) => item.name.toLocaleLowerCase().includes(term)).map((item) => ({ name: item.name, href: `/shop?brand=${encodeURIComponent(item.slug)}` })) },
+  ].filter((group) => group.items.length > 0);
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-12">
@@ -123,11 +157,11 @@ export default function SearchPage() {
             </button>
           }
         />
-      ) : data && data.items.length > 0 ? (
+      ) : data && (matches.length > 0 || data.items.length > 0) ? (
         <>
-          <ShopProductGrid items={data.items} trackClicks locale={locale} />
-          <div className="mt-10">
-            <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+          <div className="space-y-6">
+            {matches.map((group) => <section key={group.label} aria-label={group.label}><h2 className="mb-2 text-sm font-semibold text-muted-foreground">{group.label}</h2><div className="flex flex-wrap gap-2">{group.items.map((item) => <Link key={`${group.label}-${item.href}`} href={item.href} className="rounded-full border border-border px-3 py-1.5 text-sm hover:border-foreground">{item.name}</Link>)}</div></section>)}
+            {data.items.length ? <section><h2 className="mb-3 text-sm font-semibold text-muted-foreground">{t.shopTitle}</h2><ShopProductGrid items={data.items} trackClicks locale={locale} /><div className="mt-10"><Pagination page={page} totalPages={totalPages} onPageChange={setPage} /></div></section> : null}
           </div>
         </>
       ) : (

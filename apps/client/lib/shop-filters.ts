@@ -1,5 +1,9 @@
 export type ShopFilterValues = {
   q: string;
+  department: string;
+  productType: string;
+  concern: string;
+  ingredient: string;
   category: string;
   problemCategory: string;
   brand: string;
@@ -19,6 +23,10 @@ export type ShopFilterValues = {
 export function shopFilterQuery(values: ShopFilterValues, page?: number) {
   const params = new URLSearchParams();
   if (values.q) params.set('q', values.q);
+  if (values.department) params.set('department', values.department);
+  if (values.productType) params.set('productType', values.productType);
+  if (values.concern) params.set('concern', values.concern);
+  if (values.ingredient) params.set('ingredient', values.ingredient);
   if (values.category) params.set('category', values.category);
   if (values.problemCategory) params.set('problemCategory', values.problemCategory);
   if (values.brand) params.set('brand', values.brand);

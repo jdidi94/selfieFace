@@ -8,6 +8,7 @@ import { shopFilterQuery, type ShopFilterValues } from '@/lib/shop-filters';
 import {
   type CatalogBrand,
   type CatalogCategory,
+  type CatalogTaxonomy,
   type Currency,
   type ProductListResponse,
 } from '@lumea/types';
@@ -33,6 +34,10 @@ function parseFilters(params: Record<string, string | string[] | undefined>): Sh
   const kindRaw = first(params.kind) ?? '';
   return {
     q: first(params.q) ?? '',
+    department: first(params.department) ?? '',
+    productType: first(params.productType) ?? '',
+    concern: first(params.concern) ?? '',
+    ingredient: first(params.ingredient) ?? '',
     category: first(params.category) ?? '',
     problemCategory: first(params.problemCategory) ?? '',
     brand: first(params.brand) ?? '',
@@ -97,6 +102,7 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
   };
   let categories: CatalogCategory[] = [];
   let brands: CatalogBrand[] = [];
+  let taxonomy: CatalogTaxonomy = { departments: [], productTypes: [], concerns: [], ingredients: [] };
   let priceBounds: { min: number; max: number; currency: Currency } = {
     min: 0,
     max: 0,
@@ -105,13 +111,14 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
   let apiDown = false;
 
   try {
-    [products, categories, brands, priceBounds] = await Promise.all([
+    [products, categories, brands, priceBounds, taxonomy] = await Promise.all([
       fetchApi<ProductListResponse>(`/products?${query.toString()}`),
       fetchApi<CatalogCategory[]>(`/categories?locale=${locale}&currency=${currency}`),
       fetchApi<CatalogBrand[]>(`/brands?locale=${locale}&currency=${currency}`),
       fetchApi<{ min: number; max: number; currency: Currency }>(
         `/products/catalog/price-range?currency=${currency}`,
       ),
+      fetchApi<CatalogTaxonomy>(`/taxonomy?locale=${locale}&currency=${currency}`),
     ]);
   } catch {
     apiDown = true;
@@ -128,6 +135,16 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
       )
     : [];
   const selectedCategorySlug = selectedCategory?.slug ?? '';
+  const selectedProductType = taxonomy.productTypes.find((item) => item.slug === filters.productType);
+  const selectedDepartment = taxonomy.departments.find((item) => item.slug === filters.department)
+    ?? taxonomy.departments.find((item) => item.id === selectedProductType?.departmentId);
+  const childTypes = selectedDepartment
+    ? taxonomy.productTypes.filter((item) => item.departmentId === selectedDepartment.id)
+    : [];
+  const taxonomyHref = (next: Partial<ShopFilterValues>) => {
+    const merged = { ...filters, ...next };
+    return `/shop?${shopFilterQuery({ ...merged, productType: next.department !== undefined ? '' : merged.productType, concern: next.department !== undefined || next.productType !== undefined ? '' : merged.concern, ingredient: next.department !== undefined || next.productType !== undefined ? '' : merged.ingredient }).toString()}`;
+  };
   const pageQuery = (p: number) => {
     const qs = shopFilterQuery(filters, p);
     return `/shop?${qs.toString()}`;
@@ -156,23 +173,42 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
         <p className="mt-3 text-muted-foreground">{t.shopSubtitle(currency)}</p>
       </div>
 
-      {categories.length > 0 ? (
+      {taxonomy.departments.length > 0 ? (
         <div className="mb-8 space-y-3">
-          <nav className="flex flex-wrap gap-3 text-sm" aria-label={t.category}>
-            {categories.filter((category) => category.kind !== 'PROBLEM').map((c) => (
+          {selectedDepartment ? (
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <Link href={selectedProductType ? taxonomyHref({ productType: '', concern: '', ingredient: '' }) : taxonomyHref({ department: '', productType: '', concern: '', ingredient: '' })} aria-label={locale === 'ar' ? 'العودة إلى الأقسام' : 'Go back in taxonomy'} className="rounded-full border border-border px-3 py-1.5 hover:text-foreground">← {selectedProductType ? selectedDepartment.name : (locale === 'ar' ? 'الأقسام' : 'All departments')}</Link>
+              <span>{selectedDepartment.name}{selectedProductType ? ` / ${selectedProductType.name}` : ''}</span>
+            </div>
+          ) : null}
+          <div className="relative">
+            <nav dir={locale === 'ar' ? 'rtl' : 'ltr'} className="flex max-w-full snap-x snap-proximity gap-3 overflow-x-auto overscroll-x-contain pb-2 pe-8 text-sm [scrollbar-width:thin]" aria-label={t.category}>
+            {(selectedDepartment ? childTypes : taxonomy.departments).map((item) => (
               <Link
-                key={c.id}
-                href={`/shop?category=${encodeURIComponent(c.slug)}`}
-                className={`rounded-full border px-3 py-1.5 transition-colors ${
-                  filters.category === c.slug
+                key={item.id}
+                href={selectedDepartment
+                  ? taxonomyHref({ productType: item.slug })
+                  : (taxonomy.productTypes.some((type) => type.departmentId === item.id)
+                    ? taxonomyHref({ department: item.slug })
+                    : taxonomyHref({ department: item.slug }))}
+                className={`shrink-0 snap-start rounded-full border px-3 py-1.5 transition-colors ${
+                  filters.productType === item.slug || filters.department === item.slug
                     ? 'border-primary bg-primary text-primary-foreground'
                     : 'border-border text-muted-foreground hover:border-foreground hover:text-foreground'
                 }`}
               >
-                {c.name}
+                {item.name}
               </Link>
             ))}
-          </nav>
+            </nav>
+            <span aria-hidden="true" className={`pointer-events-none absolute inset-y-0 end-0 w-8 ${locale === 'ar' ? 'bg-gradient-to-r' : 'bg-gradient-to-l'} from-background to-transparent`} />
+          </div>
+          {selectedDepartment && taxonomy.productTypes.length ? (
+            <div className="flex max-w-full flex-wrap gap-2 border-s-2 border-accent/30 ps-3">
+              {taxonomy.concerns.map((item) => <Link key={`concern-${item.id}`} href={taxonomyHref({ concern: item.slug })} className={`rounded-full border px-3 py-1 text-xs ${filters.concern === item.slug ? 'border-accent bg-accent/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>{item.name}</Link>)}
+              {taxonomy.ingredients.map((item) => <Link key={`ingredient-${item.id}`} href={taxonomyHref({ ingredient: item.slug })} className={`rounded-full border px-3 py-1 text-xs ${filters.ingredient === item.slug ? 'border-accent bg-accent/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}>{item.name}</Link>)}
+            </div>
+          ) : null}
           {relatedProblems.length > 0 ? (
             <nav className="flex flex-wrap items-center gap-2" aria-label={t.shopByConcern}>
               <span className="me-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -205,7 +241,16 @@ export default async function ShopPage({ searchParams }: { searchParams: SearchP
           currency={currency}
         />
         <div className="min-w-0 flex-1">
-          <ShopTagFilters values={filters} />
+          <ShopTagFilters values={filters} taxonomyLabels={[
+            ...(selectedDepartment ? [{ key: 'department' as const, label: `${t.departmentLabel}: ${selectedDepartment.name}` }] : []),
+            ...(selectedProductType ? [{ key: 'productType' as const, label: `${t.productTypeLabel}: ${selectedProductType.name}` }] : []),
+            ...(filters.concern ? [{ key: 'concern' as const, label: `${t.shopByConcern}: ${taxonomy.concerns.find((item) => item.slug === filters.concern)?.name ?? filters.concern}` }] : []),
+            ...(filters.ingredient ? [{ key: 'ingredient' as const, label: `${t.ingredientLabel}: ${taxonomy.ingredients.find((item) => item.slug === filters.ingredient)?.name ?? filters.ingredient}` }] : []),
+          ]} otherLabels={[
+            ...(selectedCategory ? [{ key: 'category' as const, label: `${t.category}: ${selectedCategory.name}` }] : []),
+            ...(filters.problemCategory ? [{ key: 'problemCategory' as const, label: `${t.shopByConcern}: ${categories.find((item) => item.slug === filters.problemCategory)?.name ?? filters.problemCategory}` }] : []),
+            ...(filters.brand ? [{ key: 'brand' as const, label: `${t.brand}: ${brands.find((item) => item.slug === filters.brand)?.name ?? filters.brand}` }] : []),
+          ]} />
           {apiDown ? (
             <ErrorState
               title={t.apiUnavailableTitle}

@@ -318,6 +318,86 @@ async function main() {
   const skincare = skincareByMarket.get(otherMarket.id)!;
   const bodyCare = bodyCareByMarket.get(otherMarket.id)!;
 
+  const departmentsSeed = [
+    { slug: 'visage', names: { en: 'Face', ar: 'الوجه', fr: 'Visage' } },
+    { slug: 'cheveux', names: { en: 'Hair', ar: 'الشعر', fr: 'Cheveux' } },
+    { slug: 'bain-corps', names: { en: 'Bath & Body', ar: 'الاستحمام والجسم', fr: 'Bain & Corps' } },
+    { slug: 'korean', names: { en: 'Korean', ar: 'كوري', fr: 'Coréen' } },
+  ];
+  const productTypesSeed = [
+    { slug: 'nettoyants', department: 'visage', names: { en: 'Cleansers', ar: 'منظفات', fr: 'Nettoyants' } },
+    { slug: 'cremes-hydratantes', department: 'visage', names: { en: 'Moisturizers', ar: 'كريمات مرطبة', fr: 'Crèmes hydratantes' } },
+    { slug: 'serums', department: 'visage', names: { en: 'Serums', ar: 'سيرومات', fr: 'Sérums' } },
+    { slug: 'lotions', department: 'bain-corps', names: { en: 'Lotions', ar: 'لوشن', fr: 'Lotions' } },
+    { slug: 'exfoliants', department: 'visage', names: { en: 'Exfoliants', ar: 'مقشرات', fr: 'Exfoliants' } },
+    { slug: 'masques', department: 'visage', names: { en: 'Masks', ar: 'أقنعة', fr: 'Masques' } },
+    { slug: 'solaires', department: 'visage', names: { en: 'Sunscreen', ar: 'واقيات الشمس', fr: 'Solaires' } },
+  ];
+  const concernsSeed = [
+    { slug: 'peaux-seches', names: { en: 'Dry skin', ar: 'بشرة جافة', fr: 'Peaux sèches' } },
+    { slug: 'peaux-acneiques', names: { en: 'Acne-prone skin', ar: 'بشرة معرضة لحب الشباب', fr: 'Peaux acnéiques' } },
+    { slug: 'points-noirs', names: { en: 'Blackheads', ar: 'الرؤوس السوداء', fr: 'Points noirs' } },
+    { slug: 'pores-dilates', names: { en: 'Enlarged pores', ar: 'مسام واسعة', fr: 'Pores dilatés' } },
+    { slug: 'cernes', names: { en: 'Dark circles', ar: 'هالات سوداء', fr: 'Cernes' } },
+    { slug: 'taches-brunes', names: { en: 'Dark spots', ar: 'بقع داكنة', fr: 'Taches brunes' } },
+    { slug: 'peaux-ternes', names: { en: 'Dull skin', ar: 'بشرة باهتة', fr: 'Peaux ternes' } },
+    { slug: 'rides', names: { en: 'Wrinkles', ar: 'تجاعيد', fr: 'Rides' } },
+    { slug: 'rougeurs', names: { en: 'Redness', ar: 'احمرار', fr: 'Rougeurs' } },
+  ];
+  const ingredientsSeed = [
+    { slug: 'acide-hyaluronique', names: { en: 'Hyaluronic Acid', ar: 'حمض الهيالورونيك', fr: 'Acide hyaluronique' } },
+    { slug: 'niacinamide', names: { en: 'Niacinamide', ar: 'نياسيناميد', fr: 'Niacinamide' } },
+    { slug: 'aha', names: { en: 'AHA', ar: 'أحماض ألفا هيدروكسي', fr: 'AHA' } },
+    { slug: 'bha', names: { en: 'BHA', ar: 'أحماض بيتا هيدروكسي', fr: 'BHA' } },
+    { slug: 'vitamine-c', names: { en: 'Vitamin C', ar: 'فيتامين سي', fr: 'Vitamine C' } },
+    { slug: 'retinoides', names: { en: 'Retinoids', ar: 'ريتينويدات', fr: 'Rétinoïdes' } },
+    { slug: 'peptides', names: { en: 'Peptides', ar: 'ببتيدات', fr: 'Peptides' } },
+    { slug: 'spf', names: { en: 'SPF', ar: 'عامل الحماية من الشمس', fr: 'SPF' } },
+  ];
+  const seededDepartments = new Map<string, string>();
+  const seededTypes = new Map<string, string>();
+  const seededConcerns = new Map<string, string>();
+  const seededIngredients = new Map<string, string>();
+  async function seedTaxonomyRow(kind: 'department' | 'productType' | 'skinConcern' | 'ingredient', marketId: string, slug: string, names: { en: string; ar: string; fr: string }, sortOrder: number, departmentId?: string) {
+    const delegate: any = kind === 'department' ? prisma.department : kind === 'productType' ? prisma.productType : kind === 'skinConcern' ? prisma.skinConcern : prisma.ingredient;
+    const row = await delegate.upsert({
+      where: { marketId_slug: { marketId, slug } },
+      update: { name: names.en, sortOrder, ...(kind === 'productType' ? { departmentId: departmentId ?? null } : {}) },
+      create: { name: names.en, slug, sortOrder, marketId, ...(kind === 'productType' ? { departmentId: departmentId ?? null } : {}) },
+    });
+    const translationModel = kind === 'department' ? prisma.departmentTranslation : kind === 'productType' ? prisma.productTypeTranslation : kind === 'skinConcern' ? prisma.skinConcernTranslation : prisma.ingredientTranslation;
+    const fk = kind === 'department' ? 'departmentId' : kind === 'productType' ? 'productTypeId' : kind === 'skinConcern' ? 'skinConcernId' : 'ingredientId';
+    for (const locale of [Locale.en, Locale.ar, Locale.fr]) {
+      const translatedName = names[locale];
+      await (translationModel as any).upsert({
+        where: { [`${fk}_locale`]: { [fk]: row.id, locale } },
+        create: { [fk]: row.id, locale, name: translatedName },
+        update: { name: translatedName },
+      });
+    }
+    return row.id;
+  }
+  for (const market of allMarkets) {
+    const marketDepartments = new Map<string, string>();
+    for (const [index, item] of departmentsSeed.entries()) {
+      const id = await seedTaxonomyRow('department', market.id, item.slug, item.names, index);
+      marketDepartments.set(item.slug, id);
+      if (market.id === otherMarket.id) seededDepartments.set(item.slug, id);
+    }
+    for (const [index, item] of productTypesSeed.entries()) {
+      const id = await seedTaxonomyRow('productType', market.id, item.slug, item.names, index, marketDepartments.get(item.department));
+      if (market.id === otherMarket.id) seededTypes.set(item.slug, id);
+    }
+    for (const [index, item] of concernsSeed.entries()) {
+      const id = await seedTaxonomyRow('skinConcern', market.id, item.slug, item.names, index);
+      if (market.id === otherMarket.id) seededConcerns.set(item.slug, id);
+    }
+    for (const [index, item] of ingredientsSeed.entries()) {
+      const id = await seedTaxonomyRow('ingredient', market.id, item.slug, item.names, index);
+      if (market.id === otherMarket.id) seededIngredients.set(item.slug, id);
+    }
+  }
+
   const products = [
     {
       name: 'Hydrating Body Lotion',
@@ -559,12 +639,29 @@ async function main() {
             weightGrams: v.weightGrams,
             isActive: true,
             prices: {
-              create: pricesFromUsd(v.usd, v.compareUsd),
+              create: pricesFromUsd(v.usd, 'compareUsd' in v ? v.compareUsd : undefined),
             },
           })),
         },
       },
     });
+  }
+
+  const sampleAssignments: Record<string, { department: string; types: string[]; concerns: string[]; ingredients: string[] }> = {
+    'hydrating-body-lotion': { department: 'bain-corps', types: ['lotions'], concerns: ['peaux-seches'], ingredients: ['acide-hyaluronique'] },
+    'gentle-cream-cleanser': { department: 'visage', types: ['nettoyants'], concerns: ['peaux-seches', 'rougeurs'], ingredients: ['niacinamide'] },
+    'barrier-repair-serum': { department: 'visage', types: ['serums'], concerns: ['peaux-seches', 'rougeurs'], ingredients: ['niacinamide', 'peptides'] },
+    'daily-mineral-spf-30': { department: 'visage', types: ['solaires'], concerns: ['taches-brunes'], ingredients: ['spf'] },
+  };
+  for (const [slug, assignment] of Object.entries(sampleAssignments)) {
+    const product = await prisma.product.findUnique({ where: { marketId_slug: { marketId: otherMarket.id, slug } } });
+    if (!product) continue;
+    await prisma.product.update({ where: { id: product.id }, data: {
+      departmentId: seededDepartments.get(assignment.department)!,
+      productTypes: { set: assignment.types.map((item) => ({ id: seededTypes.get(item)! })) },
+      skinConcerns: { set: assignment.concerns.map((item) => ({ id: seededConcerns.get(item)! })) },
+      ingredients: { set: assignment.ingredients.map((item) => ({ id: seededIngredients.get(item)! })) },
+    } });
   }
 
   const productImages: Record<string, { url: string; alt: string }[]> = {

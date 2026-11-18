@@ -1,3 +1,4 @@
+import { FallbackImage } from '@lumea/ui';
 import { fetchApi, mediaUrl } from '@/lib/api';
 import { getMessages } from '@/lib/messages';
 import { localizedAbsoluteUrl, seoAlternates } from '@/lib/seo';
@@ -51,14 +52,15 @@ export default async function JournalPage() {
               return (
                 <li key={article.id} className="py-8 first:pt-0">
                   <Link href={`/journal/${article.slug}`} className="group block">
-                    {cover && (
+                    {
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={cover}
+                      <FallbackImage
+                        src={cover ?? '/images/defaults/journal.webp'}
                         alt=""
                         className="mb-4 aspect-[16/9] w-full rounded-lg object-cover"
+                        fallbackSrc="/images/defaults/journal.webp"
                       />
-                    )}
+                    }
                     <h2 className="font-display text-2xl group-hover:underline">{article.title}</h2>
                     {article.excerpt && (
                       <p className="mt-2 text-muted-foreground">{article.excerpt}</p>

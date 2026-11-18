@@ -24,6 +24,11 @@ export type StockChangeEvent = {
   allocations: AllocationPlan[];
 };
 
+/** Serialize stock decisions for one SKU before reading or changing its warehouses. */
+export async function lockVariantStock(db: Db, variantId: string): Promise<void> {
+  await db.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "ProductVariant" WHERE "id" = ${variantId} FOR UPDATE`;
+}
+
 async function marketIdForVariant(db: Db, variantId: string): Promise<string> {
   const variant = await db.productVariant.findUniqueOrThrow({
     where: { id: variantId },
@@ -189,6 +194,7 @@ export async function adjustWarehouseStock(
     note?: string | null;
   },
 ): Promise<{ previousAggregate: number; nextAggregate: number }> {
+  await lockVariantStock(db, opts.variantId);
   const variant = await db.productVariant.findUniqueOrThrow({
     where: { id: opts.variantId },
     include: { product: { select: { marketId: true } } },
@@ -239,6 +245,7 @@ export async function allocateAndDeduct(
     reason?: InventoryReason;
   },
 ): Promise<AllocationPlan[]> {
+  await lockVariantStock(db, opts.variantId);
   const stocks = await loadVariantWarehouseStocks(db, opts.variantId);
   const available = stocks.reduce((s, w) => s + w.quantity, 0);
   if (available < opts.quantity) {
@@ -259,6 +266,7 @@ export async function allocateAndDeduct(
       await db.orderItemAllocation.create({
         data: {
           orderItemId: opts.orderItemId,
+          variantId: opts.variantId,
           warehouseId: step.warehouseId,
           quantity: step.quantity,
         },

@@ -15,6 +15,7 @@ type InitPaymentInput = {
   lastName?: string | null;
   phoneNumber?: string | null;
   email?: string | null;
+  lifespan?: number;
 };
 
 type InitPaymentResult = {
@@ -56,7 +57,7 @@ export class KonnectService {
         type: 'immediate',
         description: input.description ?? `Order ${input.orderNumber}`,
         acceptedPaymentMethods: ['wallet', 'bank_card', 'e-DINAR'],
-        lifespan: 60,
+        lifespan: input.lifespan ?? 60,
         checkoutForm: false,
         addPaymentFeesToAmount: false,
         orderId: input.orderId,

@@ -25,6 +25,7 @@ export function ProductVariantPicker({
   variants,
   currency,
   initialVariantId,
+  isIncoming = false,
   lowStockThreshold = 5,
   competitorPriceAmount,
   competitorPriceSource,
@@ -33,6 +34,7 @@ export function ProductVariantPicker({
   variants: ProductVariantDto[];
   currency: Currency | string;
   initialVariantId?: string;
+  isIncoming?: boolean;
   /** From store settings — show “limited stock” at or below this qty. */
   lowStockThreshold?: number;
   competitorPriceAmount?: number | null;
@@ -52,16 +54,16 @@ export function ProductVariantPicker({
     return <p className="text-sm text-muted-foreground">{t.noVariants}</p>;
   }
 
-  const inStock = selected.stock > 0;
-  const stockLabel = stockStatusLabel(selected.stock, lowStockThreshold, t);
+  const inStock = selected.stock > 0 && !isIncoming;
+  const stockLabel = isIncoming
+    ? t.labelIncoming
+    : stockStatusLabel(selected.stock, lowStockThreshold, t);
   const competitorSaving =
     competitorPriceAmount != null && competitorPriceAmount > selected.price
       ? competitorPriceAmount - selected.price
       : null;
   const competitorSavingPercent =
-    competitorSaving != null
-      ? Math.round((competitorSaving / competitorPriceAmount!) * 100)
-      : null;
+    competitorSaving != null ? Math.round((competitorSaving / competitorPriceAmount!) * 100) : null;
   const [adding, setAdding] = useState(false);
 
   async function onAdd() {
@@ -90,15 +92,28 @@ export function ProductVariantPicker({
         price={selected.price}
         compareAtPrice={selected.compareAtPrice}
         currency={currency}
+        locale={locale}
         className="text-xl"
       />
       {competitorSaving != null && competitorSavingPercent != null ? (
         <aside className="rounded-md border border-primary/25 bg-primary/5 p-3 text-sm">
           <p className="font-medium text-foreground">
-            {t.comparisonOtherPrice}: {formatMoney(competitorPriceAmount!, currency as Currency)}
+            {t.comparisonOtherPrice}:{' '}
+            {formatMoney(
+              competitorPriceAmount!,
+              currency as Currency,
+              locale === 'ar' ? 'ar' : undefined,
+            )}
           </p>
           <p className="mt-1 text-muted-foreground">
-            {t.comparisonSave(formatMoney(competitorSaving, currency as Currency), competitorSavingPercent)}
+            {t.comparisonSave(
+              formatMoney(
+                competitorSaving,
+                currency as Currency,
+                locale === 'ar' ? 'ar' : undefined,
+              ),
+              competitorSavingPercent,
+            )}
             {competitorPriceSource ? ` · ${competitorPriceSource}` : ''}
           </p>
         </aside>
@@ -146,7 +161,7 @@ export function ProductVariantPicker({
           disabled={!inStock || adding}
           onClick={() => void onAdd()}
         >
-          {adding ? t.addingToBag : inStock ? t.addToBag : t.outOfStock}
+          {adding ? t.addingToBag : inStock ? t.addToBag : isIncoming ? t.labelIncoming : t.outOfStock}
         </Button>
       </div>
       {!inStock && (
@@ -157,11 +172,15 @@ export function ProductVariantPicker({
       {message && <p className="text-sm text-muted-foreground">{message}</p>}
 
       {/* Sticky mobile CTA */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur md:hidden">
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden">
         <div className="mx-auto flex max-w-6xl items-center gap-3">
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">
-              {formatMoney(selected.price, currency as Currency)}
+              {formatMoney(
+                selected.price,
+                currency as Currency,
+                locale === 'ar' ? 'ar' : undefined,
+              )}
             </p>
             {stockLabel ? (
               <p
@@ -169,7 +188,7 @@ export function ProductVariantPicker({
                   !inStock ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-400'
                 }`}
               >
-                {stockLabel}
+              {stockLabel}
               </p>
             ) : null}
           </div>
@@ -183,7 +202,7 @@ export function ProductVariantPicker({
               {adding ? t.addingToBag : t.addToBag}
             </Button>
           ) : (
-            <span className="shrink-0 text-sm text-muted-foreground">{t.outOfStock}</span>
+            <span className="shrink-0 text-sm text-muted-foreground">{isIncoming ? t.labelIncoming : t.outOfStock}</span>
           )}
         </div>
         {!inStock && (

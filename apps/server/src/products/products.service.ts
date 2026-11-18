@@ -16,6 +16,7 @@ import {
 import {
   productAdminListQuerySchema,
   productBulkTagsSchema,
+  productBulkUpdateSchema,
   productCreateSchema,
   productListQuerySchema,
   productPriceRangeQuerySchema,
@@ -36,6 +37,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ReviewsService } from '../reviews/reviews.service';
 import { slugify } from '../common/slug.util';
 import { setVariantStockOnDefaultWarehouse } from '../inventory/warehouse-stock.util';
+import { AdminProductivityService } from '../admin-tools/admin-productivity.service';
 import {
   mapProductDetail,
   mapProductListItem,
@@ -69,6 +71,10 @@ function ritualPartnerTags(tags: string[]): string[] {
 const productInclude = {
   category: { include: { translations: true } },
   problemCategories: { include: { translations: true } },
+  department: { include: { translations: true } },
+  productTypes: { include: { translations: true } },
+  skinConcerns: { include: { translations: true } },
+  ingredients: { include: { translations: true } },
   brand: { include: { translations: true } },
   market: true,
   variants: { include: { prices: true } },
@@ -115,6 +121,7 @@ export class ProductsService {
     private readonly reviewsService: ReviewsService,
     private readonly catalogCache: CatalogCacheService,
     private readonly marketsService: MarketsService,
+    private readonly adminProductivity: AdminProductivityService,
   ) {}
 
   async listPublic(query: unknown): Promise<ProductListResponse> {
@@ -135,6 +142,10 @@ export class ProductsService {
   ): Promise<ProductListResponse> {
     const {
       q,
+      department,
+      productType,
+      concern,
+      ingredient,
       category,
       problemCategory,
       brand,
@@ -165,6 +176,7 @@ export class ProductsService {
       status: ProductStatus.ACTIVE,
       marketId: marketRow.id,
       variants: stockFilter,
+      brand: { isActive: true },
       ...(kind ? { kind: kind as ProductKind } : {}),
     };
 
@@ -182,25 +194,48 @@ export class ProductsService {
             },
           },
         },
+        { department: { is: { translations: { some: { name: { contains: q, mode: 'insensitive' } } } } } },
+        { productTypes: { some: { OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { translations: { some: { name: { contains: q, mode: 'insensitive' } } } },
+        ] } } },
+        { skinConcerns: { some: { OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { translations: { some: { name: { contains: q, mode: 'insensitive' } } } },
+        ] } } },
+        { ingredients: { some: { OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { translations: { some: { name: { contains: q, mode: 'insensitive' } } } },
+        ] } } },
+        { brand: { is: { OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { translations: { some: { name: { contains: q, mode: 'insensitive' } } } },
+        ] } } },
       ];
     }
+    if (department) where.department = { slug: department, marketId: marketRow.id, isActive: true };
+    if (productType) where.productTypes = { some: { slug: productType, marketId: marketRow.id, isActive: true } };
+    if (concern) where.skinConcerns = { some: { slug: concern, marketId: marketRow.id, isActive: true } };
+    if (ingredient) where.ingredients = { some: { slug: ingredient, marketId: marketRow.id, isActive: true } };
     if (category) {
       const matchedCategory = await this.prisma.category.findUnique({
         where: { marketId_slug: { marketId: marketRow.id, slug: category } },
-        select: { id: true, kind: true },
+        select: { id: true, kind: true, isActive: true },
       });
-      if (matchedCategory?.kind === 'PROBLEM') {
-        where.problemCategories = { some: { id: matchedCategory.id } };
+      if (!matchedCategory?.isActive) {
+        where.id = '__inactive-category__';
+      } else if (matchedCategory.kind === 'PROBLEM') {
+        where.problemCategories = { some: { id: matchedCategory.id, isActive: true } };
       } else {
-        where.category = { slug: category, marketId: marketRow.id };
+        where.category = { slug: category, marketId: marketRow.id, isActive: true };
       }
     }
     if (problemCategory) {
       where.problemCategories = {
-        some: { slug: problemCategory, marketId: marketRow.id },
+        some: { slug: problemCategory, marketId: marketRow.id, isActive: true },
       };
     }
-    if (brand) where.brand = { slug: brand, marketId: marketRow.id };
+    if (brand) where.brand = { slug: brand, marketId: marketRow.id, isActive: true };
     if (incoming) where.isIncoming = true;
     if (recommended) where.popularityScore = { gt: 0 };
     if (promotion) {
@@ -574,6 +609,7 @@ export class ProductsService {
     const marketRow = await this.marketsService.getByCode(resolvedMarket);
     await this.assertCatalogRefsInMarket(data.categoryId, data.brandId, marketRow.id);
     await this.assertProblemCategories(data.problemCategoryIds ?? [], data.categoryId, marketRow.id);
+    await this.assertTaxonomyRefs(data.departmentId ?? null, data.productTypeIds ?? [], data.skinConcernIds ?? [], data.ingredientIds ?? [], marketRow.id);
     const product = await this.prisma.product.create({
       data: {
         name: copy.name,
@@ -589,6 +625,10 @@ export class ProductsService {
         competitorPriceSource: data.competitorPriceSource ?? null,
         competitorPriceCheckedAt: data.competitorPriceCheckedAt ?? null,
         categoryId: data.categoryId,
+        ...(data.departmentId ? { departmentId: data.departmentId } : {}),
+        productTypes: data.productTypeIds?.length ? { connect: data.productTypeIds.map((id) => ({ id })) } : undefined,
+        skinConcerns: data.skinConcernIds?.length ? { connect: data.skinConcernIds.map((id) => ({ id })) } : undefined,
+        ingredients: data.ingredientIds?.length ? { connect: data.ingredientIds.map((id) => ({ id })) } : undefined,
         problemCategories: data.problemCategoryIds?.length
           ? { connect: data.problemCategoryIds.map((id) => ({ id })) }
           : undefined,
@@ -689,11 +729,14 @@ export class ProductsService {
     });
   }
 
-  async update(id: string, input: unknown): Promise<ProductDetail> {
+  async update(id: string, input: unknown, adminUserId?: string): Promise<ProductDetail> {
     const parsed = productUpdateSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
 
-    const existing = await this.prisma.product.findUnique({ where: { id } });
+    const existing = await this.prisma.product.findUnique({
+      where: { id },
+      include: { variants: { include: { prices: true } }, market: { select: { code: true } } },
+    });
     if (!existing) throw new NotFoundException('Product not found');
 
     const data = parsed.data;
@@ -717,6 +760,9 @@ export class ProductsService {
         data.categoryId ?? existing.categoryId,
         existing.marketId,
       );
+    }
+    if (data.departmentId !== undefined || data.productTypeIds !== undefined || data.skinConcernIds !== undefined || data.ingredientIds !== undefined) {
+      await this.assertTaxonomyRefs(data.departmentId !== undefined ? data.departmentId : existing.departmentId, data.productTypeIds ?? [], data.skinConcernIds ?? [], data.ingredientIds ?? [], existing.marketId);
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -766,6 +812,10 @@ export class ProductsService {
             ? { competitorPriceCheckedAt: data.competitorPriceCheckedAt }
             : {}),
           ...(data.categoryId != null ? { categoryId: data.categoryId } : {}),
+          ...(data.departmentId !== undefined ? { departmentId: data.departmentId } : {}),
+          ...(data.productTypeIds !== undefined ? { productTypes: { set: data.productTypeIds.map((id) => ({ id })) } } : {}),
+          ...(data.skinConcernIds !== undefined ? { skinConcerns: { set: data.skinConcernIds.map((id) => ({ id })) } } : {}),
+          ...(data.ingredientIds !== undefined ? { ingredients: { set: data.ingredientIds.map((id) => ({ id })) } } : {}),
           ...(data.problemCategoryIds !== undefined
             ? {
                 problemCategories: {
@@ -902,11 +952,37 @@ export class ProductsService {
           });
         }
       }
-    });
+    }, { timeout: 20_000 });
 
     await this.catalogCache.invalidateCatalog();
     await this.syncPackVariantStock(id);
-    return this.getAdmin(id);
+    if (adminUserId) {
+      const updated = await this.prisma.product.findUniqueOrThrow({
+        where: { id },
+        include: { variants: { include: { prices: true } } },
+      });
+      if (existing.status !== updated.status) {
+        await this.adminProductivity.recordChange({
+          marketId: existing.marketId, adminUserId, entityType: 'PRODUCT', entityId: id,
+          entityName: updated.name, field: 'status', before: existing.status, after: updated.status,
+        });
+      }
+      const beforePrices = new Map<string, { sku: string; currency: Currency; amount: (typeof existing.variants)[number]['prices'][number]['amount']; compareAtAmount: (typeof existing.variants)[number]['prices'][number]['compareAtAmount'] }>(existing.variants.flatMap((variant) => variant.prices.map((price) => [`${variant.sku}:${price.currency}`, { sku: variant.sku, currency: price.currency, amount: price.amount, compareAtAmount: price.compareAtAmount }] as const)));
+      for (const variant of updated.variants) {
+        for (const price of variant.prices) {
+          const key = `${variant.sku}:${price.currency}`;
+          const before = beforePrices.get(key);
+          const after = { sku: variant.sku, currency: price.currency, amount: price.amount, compareAtAmount: price.compareAtAmount };
+          if (JSON.stringify(before) !== JSON.stringify(after)) {
+            await this.adminProductivity.recordChange({
+              marketId: existing.marketId, adminUserId, entityType: 'PRODUCT', entityId: id,
+              entityName: updated.name, field: `price:${variant.sku}:${price.currency}`, before, after,
+            });
+          }
+        }
+      }
+    }
+    return this.getAdmin(id, undefined, existing.market.code);
   }
 
   async remove(id: string) {
@@ -944,6 +1020,96 @@ export class ProductsService {
 
     await this.catalogCache.invalidateCatalog();
     return { updated: items.length, items };
+  }
+
+  async previewBulkUpdate(input: unknown, marketCode: MarketCode | string = 'OTHER') {
+    const parsed = productBulkUpdateSchema.safeParse(input);
+    if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
+    const market = await this.marketsService.getByCode(marketCode);
+    const products = await this.prisma.product.findMany({
+      where: { id: { in: parsed.data.productIds }, marketId: market.id },
+      include: { category: { select: { id: true, name: true } }, brand: { select: { id: true, name: true } } },
+      orderBy: { name: 'asc' },
+    });
+    if (products.length !== new Set(parsed.data.productIds).size) {
+      throw new BadRequestException('One or more selected products are missing or belong to another market');
+    }
+    const [category, brand] = await Promise.all([
+      parsed.data.categoryId ? this.prisma.category.findFirst({ where: { id: parsed.data.categoryId, marketId: market.id } }) : null,
+      parsed.data.brandId ? this.prisma.brand.findFirst({ where: { id: parsed.data.brandId, marketId: market.id } }) : null,
+    ]);
+    if (parsed.data.categoryId && !category) throw new BadRequestException('Category does not belong to this market');
+    if (parsed.data.brandId && !brand) throw new BadRequestException('Brand does not belong to this market');
+
+    const add = normalizeTags(parsed.data.addTags);
+    const remove = new Set(normalizeTags(parsed.data.removeTags));
+    const items = products.map((product) => {
+      const tags = normalizeTags([...product.tags, ...add]).filter((tag) => !remove.has(tag));
+      const before = {
+        status: product.status,
+        categoryId: product.categoryId,
+        category: product.category.name,
+        brandId: product.brandId,
+        brand: product.brand.name,
+        tags: product.tags,
+      };
+      const after = {
+        status: parsed.data.status ?? product.status,
+        categoryId: parsed.data.categoryId ?? product.categoryId,
+        category: parsed.data.categoryId ? category!.name : product.category.name,
+        brandId: parsed.data.brandId ?? product.brandId,
+        brand: parsed.data.brandId ? brand!.name : product.brand.name,
+        tags,
+      };
+      const changes = (Object.keys(before) as (keyof typeof before)[]).filter(
+        (key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]),
+      );
+      return { id: product.id, name: product.name, before, after, changes };
+    });
+    return { selected: products.length, changed: items.filter((item) => item.changes.length).length, items };
+  }
+
+  async applyBulkUpdate(input: unknown, marketCode: MarketCode | string = 'OTHER', adminUserId?: string) {
+    const preview = await this.previewBulkUpdate(input, marketCode);
+    const parsed = productBulkUpdateSchema.parse(input);
+    const market = await this.marketsService.getByCode(marketCode);
+    const add = normalizeTags(parsed.addTags);
+    const remove = new Set(normalizeTags(parsed.removeTags));
+    const current = await this.prisma.product.findMany({ where: { id: { in: parsed.productIds }, marketId: market.id }, select: { id: true, name: true, tags: true } });
+    const updates = preview.items.filter((item) => item.changes.length).map((item) => {
+      const product = current.find((row) => row.id === item.id)!;
+      const tags = normalizeTags([...product.tags, ...add]).filter((tag) => !remove.has(tag));
+      return this.prisma.product.update({
+        where: { id: item.id },
+        data: {
+          ...(parsed.status ? { status: parsed.status as ProductStatus } : {}),
+          ...(parsed.categoryId ? { categoryId: parsed.categoryId } : {}),
+          ...(parsed.brandId ? { brandId: parsed.brandId } : {}),
+          ...(parsed.addTags?.length || parsed.removeTags?.length ? { tags } : {}),
+        },
+      });
+    });
+    await this.prisma.$transaction(updates);
+    if (adminUserId) {
+      for (const item of preview.items.filter((row) => row.changes.length)) {
+        const product = current.find((row) => row.id === item.id)!;
+        for (const field of item.changes) {
+          const key = field as keyof typeof item.before;
+          await this.adminProductivity.recordChange({
+            marketId: market.id,
+            adminUserId,
+            entityType: 'PRODUCT',
+            entityId: item.id,
+            entityName: product.name,
+            field: String(key),
+            before: item.before[key],
+            after: item.after[key],
+          });
+        }
+      }
+    }
+    await this.catalogCache.invalidateCatalog();
+    return { selected: preview.selected, updated: updates.length, skipped: preview.selected - updates.length };
   }
 
   async copyToMarket(id: string, input: unknown): Promise<CatalogCopyResult> {
@@ -1295,5 +1461,27 @@ export class ProductsService {
         'Problem subcategories must belong to the selected main category and market',
       );
     }
+  }
+
+  private async assertTaxonomyRefs(
+    departmentId: string | null,
+    productTypeIds: string[],
+    skinConcernIds: string[],
+    ingredientIds: string[],
+    marketId: string,
+  ) {
+    if ([productTypeIds, skinConcernIds, ingredientIds].some((ids) => new Set(ids).size !== ids.length)) {
+      throw new BadRequestException('Taxonomy assignments must be unique');
+    }
+    const [department, productTypes, concerns, ingredients] = await Promise.all([
+      departmentId ? this.prisma.department.findUnique({ where: { id: departmentId }, select: { id: true, marketId: true } }) : null,
+      this.prisma.productType.findMany({ where: { id: { in: [...new Set(productTypeIds)] } }, select: { id: true, marketId: true, departmentId: true } }),
+      this.prisma.skinConcern.findMany({ where: { id: { in: [...new Set(skinConcernIds)] } }, select: { id: true, marketId: true } }),
+      this.prisma.ingredient.findMany({ where: { id: { in: [...new Set(ingredientIds)] } }, select: { id: true, marketId: true } }),
+    ]);
+    if (departmentId && (!department || department.marketId !== marketId)) throw new BadRequestException('Department is not in this market');
+    if (productTypes.length !== new Set(productTypeIds).size || productTypes.some((item) => item.marketId !== marketId || (departmentId && item.departmentId && item.departmentId !== departmentId))) throw new BadRequestException('Product types must belong to this market and selected department');
+    if (concerns.length !== new Set(skinConcernIds).size || concerns.some((item) => item.marketId !== marketId)) throw new BadRequestException('Skin concerns must belong to this market');
+    if (ingredients.length !== new Set(ingredientIds).size || ingredients.some((item) => item.marketId !== marketId)) throw new BadRequestException('Ingredients must belong to this market');
   }
 }

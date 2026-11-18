@@ -8,7 +8,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
   }
 
-  let tags: string[] = ['catalog', 'homepage', 'categories', 'seo'];
+  let tags: string[] = ['catalog', 'homepage', 'categories', 'taxonomy', 'seo'];
   let paths: string[] = ['/', '/shop', '/search', '/journal'];
   try {
     const body = (await request.json()) as { tags?: string[]; paths?: string[] };

@@ -1,6 +1,7 @@
-import { ProductKind, type Prisma } from '@prisma/client';
+import { InventoryReason, ProductKind, type Prisma } from '@prisma/client';
 import {
   allocateAndDeduct,
+  lockVariantStock,
   setVariantStockOnDefaultWarehouse,
   syncVariantAggregateStock,
   type AllocationPlan,
@@ -17,6 +18,26 @@ export function computePackAvailable(
     min = Math.min(min, Math.floor(c.variant.stock / per));
   }
   return Number.isFinite(min) ? Math.max(0, min) : 0;
+}
+
+/** Refresh denormalized pack-variant stock after component stock is returned. */
+export async function syncPackStockForComponents(
+  tx: Prisma.TransactionClient,
+  componentVariantIds: string[],
+): Promise<void> {
+  if (!componentVariantIds.length) return;
+  const packs = await tx.product.findMany({
+    where: { kind: ProductKind.PACK, packComponents: { some: { variantId: { in: componentVariantIds } } } },
+    select: {
+      variants: { select: { id: true }, orderBy: { createdAt: 'asc' }, take: 1 },
+      packComponents: { select: { quantity: true, variant: { select: { stock: true } } } },
+    },
+  });
+  for (const pack of packs) {
+    const variantId = pack.variants[0]?.id;
+    if (!variantId) continue;
+    await setVariantStockOnDefaultWarehouse(tx, variantId, computePackAvailable(pack.packComponents), { force: true });
+  }
 }
 
 export async function getSellableStock(
@@ -64,9 +85,10 @@ export async function deductSellableStock(
     quantity: number;
     note: string;
     orderItemId?: string;
+    reason?: InventoryReason;
   },
 ): Promise<PackStockEvent[]> {
-  const variant = await tx.productVariant.findUniqueOrThrow({
+  let variant = await tx.productVariant.findUniqueOrThrow({
     where: { id: opts.variantId },
     include: {
       product: {
@@ -80,6 +102,44 @@ export async function deductSellableStock(
       },
     },
   });
+
+  if (variant.product.kind === ProductKind.PACK && variant.product.packComponents.length) {
+    for (const componentVariantId of variant.product.packComponents.map((component) => component.variant.id).sort()) {
+      await lockVariantStock(tx, componentVariantId);
+    }
+    variant = await tx.productVariant.findUniqueOrThrow({
+      where: { id: opts.variantId },
+      include: {
+        product: {
+          select: {
+            name: true,
+            kind: true,
+            packComponents: {
+              orderBy: { variantId: 'asc' },
+              include: { variant: { select: { id: true, stock: true, sku: true, name: true } } },
+            },
+          },
+        },
+      },
+    });
+  } else {
+    await lockVariantStock(tx, opts.variantId);
+    variant = await tx.productVariant.findUniqueOrThrow({
+      where: { id: opts.variantId },
+      include: {
+        product: {
+          select: {
+            name: true,
+            kind: true,
+            packComponents: {
+              orderBy: { variantId: 'asc' },
+              include: { variant: { select: { id: true, stock: true, sku: true, name: true } } },
+            },
+          },
+        },
+      },
+    });
+  }
 
   const events: PackStockEvent[] = [];
 
@@ -98,9 +158,10 @@ export async function deductSellableStock(
         variantId: c.variant.id,
         quantity: delta,
         note: opts.note,
-        // Pack lines allocate component stock without OrderItemAllocation (different SKU).
+        orderItemId: opts.orderItemId,
+        reason: opts.reason,
       });
-      const nextStock = previousStock - delta;
+      const nextStock = (await tx.productVariant.findUniqueOrThrow({ where: { id: c.variant.id }, select: { stock: true } })).stock;
       events.push({
         sku: c.variant.sku,
         variantName: c.variant.name,
@@ -110,7 +171,11 @@ export async function deductSellableStock(
         allocations,
       });
     }
-    await setVariantStockOnDefaultWarehouse(tx, variant.id, available - opts.quantity, {
+    const remainingComponents = await tx.packComponent.findMany({
+      where: { packProductId: variant.productId },
+      select: { quantity: true, variant: { select: { stock: true } } },
+    });
+    await setVariantStockOnDefaultWarehouse(tx, variant.id, computePackAvailable(remainingComponents), {
       force: true,
     });
     return events;
@@ -125,6 +190,7 @@ export async function deductSellableStock(
     quantity: opts.quantity,
     note: opts.note,
     orderItemId: opts.orderItemId,
+    reason: opts.reason,
   });
   const nextStock = previousStock - opts.quantity;
   // allocateAndDeduct already synced aggregate; keep event numbers consistent.

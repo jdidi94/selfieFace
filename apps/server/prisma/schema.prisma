@@ -134,6 +134,10 @@ model Market {
   merchandisingItems   MerchandisingRailItem[]
   orders               Order[]
   categories           Category[]
+  departments          Department[]
+  productTypes         ProductType[]
+  skinConcerns          SkinConcern[]
+  ingredients           Ingredient[]
   brands               Brand[]
   warehouses           Warehouse[]
   journalArticles      JournalArticle[]
@@ -143,6 +147,10 @@ model Market {
   behaviorEvents       BehaviorEvent[]
   legalDocuments      LegalDocument[]
   mailRecipients      MailRecipient[]
+  adminHelpNotes     AdminHelpNote[]
+  adminNotifications  AdminNotification[]
+  savedAdminFilters   AdminSavedFilter[]
+  adminChangeHistory AdminChangeHistory[]
 }
 
 model User {
@@ -167,6 +175,8 @@ model User {
   emailVerificationTokens  EmailVerificationToken[]
   oauthExchangeTokens      OAuthExchangeToken[]
   behaviorEvents           BehaviorEvent[]
+  savedAdminFilters        AdminSavedFilter[]
+  adminChangeHistory       AdminChangeHistory[]
 }
 
 model Customer {
@@ -252,6 +262,7 @@ model Category {
   slug         String
   description  String?
   sortOrder    Int                   @default(0)
+  isActive     Boolean               @default(true)
   marketId     String
   market       Market                @relation(fields: [marketId], references: [id], onDelete: Restrict)
   kind         CategoryKind          @default(CATEGORY)
@@ -284,6 +295,138 @@ model CategoryTranslation {
   @@index([locale])
 }
 
+model Department {
+  id           String                  @id @default(cuid())
+  name         String
+  slug         String
+  description  String?
+  sortOrder    Int                     @default(0)
+  isActive     Boolean                 @default(true)
+  marketId     String
+  market       Market                  @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  products     Product[]
+  productTypes ProductType[]
+  translations DepartmentTranslation[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@unique([marketId, slug])
+  @@index([marketId, isActive, sortOrder])
+}
+
+model DepartmentTranslation {
+  id           String     @id @default(cuid())
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  locale       Locale
+  name         String
+  description  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([departmentId, locale])
+  @@index([locale])
+}
+
+model ProductType {
+  id           String                   @id @default(cuid())
+  name         String
+  slug         String
+  description  String?
+  sortOrder    Int                      @default(0)
+  isActive     Boolean                  @default(true)
+  marketId     String
+  market       Market                   @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  departmentId String?
+  department   Department?              @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  products     Product[]
+  translations ProductTypeTranslation[]
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  @@unique([marketId, slug])
+  @@index([marketId, isActive, sortOrder])
+  @@index([departmentId, sortOrder])
+}
+
+model ProductTypeTranslation {
+  id            String      @id @default(cuid())
+  productTypeId String
+  productType   ProductType @relation(fields: [productTypeId], references: [id], onDelete: Cascade)
+  locale        Locale
+  name          String
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([productTypeId, locale])
+  @@index([locale])
+}
+
+model SkinConcern {
+  id           String                   @id @default(cuid())
+  name         String
+  slug         String
+  description  String?
+  sortOrder    Int                      @default(0)
+  isActive     Boolean                  @default(true)
+  marketId     String
+  market       Market                   @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  products     Product[]
+  translations SkinConcernTranslation[]
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+
+  @@unique([marketId, slug])
+  @@index([marketId, isActive, sortOrder])
+}
+
+model SkinConcernTranslation {
+  id            String      @id @default(cuid())
+  skinConcernId String
+  skinConcern   SkinConcern @relation(fields: [skinConcernId], references: [id], onDelete: Cascade)
+  locale        Locale
+  name          String
+  description   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([skinConcernId, locale])
+  @@index([locale])
+}
+
+model Ingredient {
+  id           String                  @id @default(cuid())
+  name         String
+  slug         String
+  description  String?
+  sortOrder    Int                     @default(0)
+  isActive     Boolean                 @default(true)
+  marketId     String
+  market       Market                  @relation(fields: [marketId], references: [id], onDelete: Restrict)
+  products     Product[]
+  translations IngredientTranslation[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+
+  @@unique([marketId, slug])
+  @@index([marketId, isActive, sortOrder])
+}
+
+model IngredientTranslation {
+  id           String     @id @default(cuid())
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+  locale       Locale
+  name         String
+  description  String?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@unique([ingredientId, locale])
+  @@index([locale])
+}
+
 model Brand {
   id           String             @id @default(cuid())
   name         String
@@ -292,6 +435,8 @@ model Brand {
   description  String?
   /// Public brand photo / logo URL (admin-editable string for P0)
   imageUrl     String?
+  sortOrder    Int                @default(0)
+  isActive     Boolean            @default(true)
   marketId     String
   market       Market             @relation(fields: [marketId], references: [id], onDelete: Restrict)
   createdAt    DateTime           @default(now())
@@ -339,6 +484,11 @@ model Product {
   problemCategories Category[]           @relation("ProductProblems")
   brandId          String
   brand            Brand                @relation(fields: [brandId], references: [id])
+  departmentId     String?
+  department       Department?           @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  productTypes     ProductType[]
+  skinConcerns     SkinConcern[]
+  ingredients      Ingredient[]
   /// Required market window — catalogs are separate per market; admin can copy entities between windows.
   marketId         String
   market           Market               @relation(fields: [marketId], references: [id], onDelete: Restrict)
@@ -363,6 +513,7 @@ model Product {
   @@unique([marketId, slug])
   @@index([marketId])
   @@index([categoryId])
+  @@index([departmentId])
   @@index([brandId])
   @@index([status])
   @@index([kind])
@@ -407,6 +558,7 @@ model ProductVariant {
   prices      VariantPrice[]
   cartItems   CartItem[]
   orderItems  OrderItem[]
+  orderItemAllocations OrderItemAllocation[]
   stockNotifySubscriptions StockNotifySubscription[]
   packUsages  PackComponent[]
 
@@ -754,6 +906,10 @@ model Order {
   loyaltyPointsRedeemed Int           @default(0)
   /// Points earned after payment becomes eligible (CAPTURED / COD AUTHORIZED).
   loyaltyPointsEarned   Int           @default(0)
+  /// Inventory held while card payment is pending. Null expiry means no active hold.
+  stockReservedAt       DateTime?
+  stockHoldExpiresAt    DateTime?
+  stockCommittedAt      DateTime?
   /// When set, admin (and customer) status changes are rejected until unlocked.
   lockedAt              DateTime?
   createdAt             DateTime      @default(now())
@@ -770,6 +926,7 @@ model Order {
   @@index([paymentStatus])
   @@index([currency, createdAt])
   @@index([marketId, createdAt])
+  @@index([status, paymentStatus, stockHoldExpiresAt])
   @@index([couponId])
 }
 
@@ -808,6 +965,8 @@ model OrderItemAllocation {
   id          String    @id @default(cuid())
   orderItemId String
   orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  variantId   String
+  variant     ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
   warehouseId String
   warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
   quantity    Int
@@ -900,7 +1059,87 @@ model StoreSettings {
   customerOrderEmailsEnabled   Boolean  @default(true)
   adminOrderEmailsEnabled      Boolean  @default(true)
   adminStockEmailsEnabled      Boolean  @default(true)
+  adminHelpNotesEnabled         Boolean  @default(true)
+  adminInsightsEnabled          Boolean  @default(true)
+  adminInsightEmailsEnabled     Boolean  @default(false)
   updatedAt                 DateTime @updatedAt
+}
+
+model AdminHelpNote {
+  id        String   @id @default(cuid())
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  fieldKey  String
+  title     String
+  contentEn String   @db.Text
+  contentAr String?  @db.Text
+  contentFr String?  @db.Text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([marketId, fieldKey])
+  @@index([marketId, isActive])
+}
+
+model AdminNotification {
+  id          String   @id @default(cuid())
+  marketId    String
+  market      Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  kind        String
+  title       String
+  body        String   @db.Text
+  actionUrl   String?
+  dedupeKey   String
+  source      Json?
+  status      String   @default("OPEN")
+  dueAt       DateTime?
+  emailedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([marketId, dedupeKey])
+  @@index([marketId, status, createdAt])
+  @@index([marketId, dueAt])
+}
+
+/// Persisted admin list views, private to owner unless explicitly shared.
+model AdminSavedFilter {
+  id          String   @id @default(cuid())
+  marketId    String
+  market      Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner       User     @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+  entity      String
+  name        String
+  filters     Json
+  isShared    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([marketId, ownerUserId, entity, name])
+  @@index([marketId, entity, isShared])
+  @@index([ownerUserId, entity])
+}
+
+/// Append-only record of material admin changes.
+model AdminChangeHistory {
+  id          String   @id @default(cuid())
+  marketId    String
+  market      Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  adminUserId String?
+  admin       User?    @relation(fields: [adminUserId], references: [id], onDelete: SetNull)
+  entityType  String
+  entityId    String
+  entityName  String
+  field       String
+  before      Json?
+  after       Json?
+  createdAt   DateTime @default(now())
+
+  @@index([marketId, createdAt])
+  @@index([marketId, entityType, createdAt])
+  @@index([entityId, createdAt])
 }
 
 model LegalDocument {

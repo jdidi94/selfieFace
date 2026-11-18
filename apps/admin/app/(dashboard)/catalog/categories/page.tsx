@@ -5,6 +5,7 @@ import {
   typedConfirmToken,
 } from '@/components/confirm-typed-dialog';
 import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
+import { ContextualHelp } from '@/components/contextual-help';
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -58,6 +59,7 @@ export default function CategoriesPage() {
   const [items, setItems] = useState<CatalogCategory[]>([]);
   const [names, setNames] = useState(emptyNames);
   const [categoryKind, setCategoryKind] = useState<'CATEGORY' | 'PROBLEM'>('CATEGORY');
+  const [categoryActive, setCategoryActive] = useState(true);
   const [parentCategoryId, setParentCategoryId] = useState('');
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -83,6 +85,7 @@ export default function CategoriesPage() {
   function resetForm() {
     setNames(emptyNames());
     setEditingId(null);
+    setCategoryActive(true);
     setError(null);
     setFieldErrors({});
   }
@@ -98,6 +101,7 @@ export default function CategoriesPage() {
     setEditingId(item.id);
     setNames(namesFromCategory(item));
     setCategoryKind(item.kind === 'PROBLEM' ? 'PROBLEM' : 'CATEGORY');
+    setCategoryActive(item.isActive !== false);
     setParentCategoryId(item.parentCategoryId ?? '');
     setError(null);
     setFieldErrors({});
@@ -117,6 +121,7 @@ export default function CategoriesPage() {
     const validated = validateWithSchema(categoryUpsertSchema, {
       translations,
       kind: categoryKind,
+      isActive: categoryActive,
       parentCategoryId: categoryKind === 'PROBLEM' ? parentCategoryId || null : null,
     });
     if (!validated.ok) {
@@ -191,6 +196,10 @@ export default function CategoriesPage() {
                 <option value="PROBLEM">Problem subcategory</option>
               </select>
             </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={categoryActive} onChange={(event) => setCategoryActive(event.target.checked)} />
+              Active in storefront <ContextualHelp fieldKey="categories.isActive" />
+            </label>
             {categoryKind === 'PROBLEM' ? (
               <div className="space-y-2">
                 <Label htmlFor="parent-category">Parent category</Label>
@@ -244,6 +253,7 @@ export default function CategoriesPage() {
               <TableHead>Type</TableHead>
               <TableHead>Parent</TableHead>
               <TableHead>Translations</TableHead>
+              <TableHead>Status</TableHead>
               <TableHead>Slug</TableHead>
               <TableHead />
             </TableRow>
@@ -263,6 +273,7 @@ export default function CategoriesPage() {
                     .map((t) => t.locale.toUpperCase())
                     .join(' · ') || 'EN'}
                 </TableCell>
+                <TableCell>{item.isActive === false ? 'Inactive' : 'Active'}</TableCell>
                 <TableCell>{item.slug}</TableCell>
                 <TableCell className="space-x-2 text-right">
                   <Button variant="outline" size="sm" onClick={() => openEdit(item)}>

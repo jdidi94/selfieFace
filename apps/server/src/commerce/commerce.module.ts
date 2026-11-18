@@ -4,6 +4,7 @@ import { CacheModule } from '../common/cache/cache.module';
 import { CustomersModule } from '../customers/customers.module';
 import { LoyaltyModule } from '../loyalty/loyalty.module';
 import { MarketsModule } from '../markets/markets.module';
+import { AdminToolsModule } from '../admin-tools/admin-tools.module';
 import { ReviewsModule } from '../reviews/reviews.module';
 import { AdminCouponsController } from './admin-coupons.controller';
 import { AdminOrdersController } from './admin-orders.controller';
@@ -12,6 +13,7 @@ import { AdminSettingsController } from './admin-settings.controller';
 import { AdminStockNotifyController } from './admin-stock-notify.controller';
 import { CartService } from './cart.service';
 import { CheckoutService } from './checkout.service';
+import { CheckoutRealtimeService } from './checkout-realtime.service';
 import { CommerceController } from './commerce.controller';
 import { CouponsService } from './coupons.service';
 import { KonnectService } from './konnect.service';
@@ -32,6 +34,7 @@ import { WishlistService } from './wishlist.service';
     CustomersModule,
     LoyaltyModule,
     MarketsModule,
+    AdminToolsModule,
   ],
   controllers: [
     CommerceController,
@@ -47,6 +50,7 @@ import { WishlistService } from './wishlist.service';
   providers: [
     CartService,
     CheckoutService,
+    CheckoutRealtimeService,
     OrdersService,
     StoreSettingsService,
     CouponsService,

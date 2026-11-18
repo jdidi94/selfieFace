@@ -1,3 +1,4 @@
+import { FallbackImage } from '@lumea/ui';
 import { ApiHealth } from '@/components/api-health';
 import { CategoriesCarousel } from '@/components/categories-carousel';
 import { HomeHeroCarousel } from '@/components/home-hero-carousel';
@@ -124,14 +125,13 @@ export default async function HomePage() {
                 href={banner.href ?? '/shop'}
                 className="group overflow-hidden rounded-sm border border-border bg-surface transition-colors hover:border-accent"
               >
-                {banner.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={mediaUrl(banner.imageUrl) ?? banner.imageUrl}
-                    alt=""
-                    className="aspect-[16/9] w-full object-cover"
-                  />
-                ) : null}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <FallbackImage
+                  src={mediaUrl(banner.imageUrl) || banner.imageUrl || '/images/defaults/banner.webp'}
+                  alt=""
+                  className="aspect-[16/9] w-full object-cover"
+                  fallbackSrc="/images/defaults/banner.webp"
+                />
                 <div className="p-5">
                   {banner.subtitle ? (
                     <p className="text-xs tracking-[0.2em] text-muted-foreground uppercase">

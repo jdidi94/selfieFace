@@ -20,6 +20,7 @@ import {
   syncVariantAggregateStock,
 } from './warehouse-stock.util';
 import { WarehousesService } from './warehouses.service';
+import { AdminProductivityService } from '../admin-tools/admin-productivity.service';
 
 @Injectable()
 export class InventoryService {
@@ -31,6 +32,7 @@ export class InventoryService {
     private readonly mail: SesMailService,
     private readonly warehousesService: WarehousesService,
     private readonly marketsService: MarketsService,
+    private readonly adminProductivity: AdminProductivityService,
   ) {}
 
   async list(marketCode: MarketCode | string = 'OTHER'): Promise<InventoryListResponse> {
@@ -84,7 +86,7 @@ export class InventoryService {
     };
   }
 
-  async adjust(variantId: string, input: unknown) {
+  async adjust(variantId: string, input: unknown, adminUserId?: string) {
     const parsed = inventoryAdjustSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
 
@@ -129,6 +131,10 @@ export class InventoryService {
     });
 
     await this.catalogCache.invalidateCatalog();
+    if (adminUserId) await this.adminProductivity.recordChange({
+      marketId: variant.product.marketId, adminUserId, entityType: 'INVENTORY', entityId: variantId,
+      entityName: `${variant.product.name} · ${variant.sku}`, field: 'stock', before: previousStock, after: nextStock,
+    });
     await this.stockNotify.onStockAvailable(variantId, previousStock, nextStock);
     await this.maybeNotifyLowStock({
       previousStock,
@@ -141,7 +147,7 @@ export class InventoryService {
     return updated;
   }
 
-  async transfer(input: unknown) {
+  async transfer(input: unknown, adminUserId?: string) {
     const parsed = inventoryTransferSchema.safeParse(input);
     if (!parsed.success) throw new BadRequestException(parsed.error.flatten());
     const data = parsed.data;
@@ -195,6 +201,11 @@ export class InventoryService {
     }
 
     await this.catalogCache.invalidateCatalog();
+    if (adminUserId) await this.adminProductivity.recordChange({
+      marketId: variant.product.marketId, adminUserId, entityType: 'INVENTORY', entityId: data.variantId,
+      entityName: variant.sku, field: 'warehouse-transfer',
+      before: { from: fromWh.code, to: toWh.code }, after: { from: fromWh.code, to: toWh.code, quantity: data.quantity },
+    });
     return this.prisma.productVariant.findUniqueOrThrow({
       where: { id: data.variantId },
       include: {

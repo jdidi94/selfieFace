@@ -16,7 +16,8 @@ export function ProductJsonLd({ product, url, imageUrl }: ProductJsonLdProps) {
       ? (variant.price / 100).toFixed(2)
       : undefined;
   const priceCurrency = variant?.currency ?? product.currency;
-  const inStock = product.variants.some((v) => v.isActive && v.stock > 0);
+  const inStock =
+    !product.isIncoming && product.variants.some((v) => v.isActive && v.stock > 0);
   const availability = inStock
     ? 'https://schema.org/InStock'
     : 'https://schema.org/OutOfStock';

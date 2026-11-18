@@ -3,6 +3,8 @@
 import { useAuth } from '@/lib/auth-context';
 import { marketLabel, useAdminMarket } from '@/lib/market-context';
 import { AdminBrandMark } from '@/components/admin-brand-mark';
+import { ContextualHelpProvider } from '@/components/contextual-help';
+import { NotificationBell } from '@/components/notification-bell';
 import {
   Avatar,
   AvatarFallback,
@@ -19,6 +21,7 @@ import { MarketCode } from '@lumea/types';
 import {
   Activity,
   BarChart3,
+  Bell,
   BookOpen,
   CircleHelp,
   FileText,
@@ -50,11 +53,14 @@ const navSections = [
     label: 'Catalog',
     items: [
       { href: '/catalog/products', label: 'Products', icon: Package },
+      { href: '/catalog/completeness', label: 'Catalog fixes', icon: Package },
       { href: '/catalog/categories', label: 'Categories', icon: Package },
+      { href: '/catalog/taxonomy', label: 'Taxonomy', icon: Package },
       { href: '/catalog/brands', label: 'Brands', icon: Package },
       { href: '/catalog/inventory', label: 'Inventory', icon: Package },
       { href: '/catalog/warehouses', label: 'Warehouses', icon: Package },
       { href: '/catalog/stock-notify', label: 'Stock alerts', icon: Package },
+      { href: '/catalog/help-notes', label: 'Field help notes', icon: CircleHelp },
     ],
   },
   {
@@ -88,6 +94,8 @@ const navSections = [
   {
     label: 'Insights',
     items: [
+      { href: '/notifications', label: 'Store reminders', icon: Bell },
+      { href: '/change-history', label: 'Change history', icon: Activity },
       { href: '/analytics', label: 'Analytics', icon: BarChart3 },
       { href: '/analytics/behavior', label: 'Behavior', icon: Activity },
     ],
@@ -186,6 +194,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             Dashboard · {marketLabel(market)}
           </p>
           <div className="flex items-center gap-3">
+            <NotificationBell />
             {user && (
               <span className="hidden text-sm text-muted-foreground sm:inline">{user.email}</span>
             )}
@@ -204,9 +213,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </header>
         {/* Remount page tree on market change so lists/forms refetch for the new window. */}
-        <main key={market} className="flex-1 bg-background p-6">
-          {children}
-        </main>
+        <ContextualHelpProvider>
+          <main key={market} className="flex-1 bg-background p-6">{children}</main>
+        </ContextualHelpProvider>
       </div>
     </div>
   );

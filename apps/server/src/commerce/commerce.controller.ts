@@ -44,7 +44,7 @@ export class CommerceController {
     return this.cartService.getOrCreate({
       cartId,
       guestToken,
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       currency: currency as 'USD' | 'TND' | 'AED' | undefined,
     });
   }
@@ -57,7 +57,11 @@ export class CommerceController {
     @Headers('x-cart-id') cartId?: string,
     @Headers('x-guest-token') guestToken?: string,
   ) {
-    return this.cartService.addItem({ cartId, guestToken, userId: user?.sub }, body);
+    return this.cartService.addItem({
+      cartId,
+      guestToken,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
+    }, body);
   }
 
   @Patch('cart/:cartId/items/:itemId')
@@ -70,7 +74,7 @@ export class CommerceController {
     @Headers('x-guest-token') guestToken?: string,
   ) {
     return this.cartService.updateItem(cartId, itemId, body, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }
@@ -84,7 +88,7 @@ export class CommerceController {
     @Headers('x-guest-token') guestToken?: string,
   ) {
     return this.cartService.removeItem(cartId, itemId, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }
@@ -98,7 +102,7 @@ export class CommerceController {
     @Headers('x-guest-token') guestToken?: string,
   ) {
     return this.cartService.setCurrency(cartId, body, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }
@@ -112,7 +116,7 @@ export class CommerceController {
     @Headers('x-guest-token') guestToken?: string,
   ) {
     return this.cartService.applyCoupon(cartId, body, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }
@@ -125,7 +129,7 @@ export class CommerceController {
     @Headers('x-guest-token') guestToken?: string,
   ) {
     return this.cartService.removeCoupon(cartId, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }
@@ -139,7 +143,7 @@ export class CommerceController {
     @Headers('x-guest-token') guestToken?: string,
   ) {
     return this.cartService.applyLoyalty(cartId, body, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }
@@ -152,7 +156,7 @@ export class CommerceController {
     @Headers('x-guest-token') guestToken?: string,
   ) {
     return this.cartService.removeLoyalty(cartId, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }
@@ -167,7 +171,7 @@ export class CommerceController {
   ) {
     const cartId = body.cartId ?? cartIdHeader ?? '';
     return this.checkoutService.quoteShipping(cartId, body, {
-      userId: user?.sub,
+      userId: user?.type === UserType.CUSTOMER ? user.sub : undefined,
       guestToken,
     });
   }

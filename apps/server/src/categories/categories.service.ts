@@ -42,7 +42,14 @@ export class CategoriesService {
       this.catalogCache.key(marketCode, CACHE_PREFIX.categories, lang),
       async () => {
         const rows = await this.prisma.category.findMany({
-          where: { marketId: market.id },
+          where: {
+            marketId: market.id,
+            isActive: true,
+            OR: [
+              { kind: 'CATEGORY', products: { some: { marketId: market.id, status: 'ACTIVE', variants: { some: { isActive: true } } } } },
+              { kind: 'PROBLEM', problemProducts: { some: { marketId: market.id, status: 'ACTIVE', variants: { some: { isActive: true } } } } },
+            ],
+          },
           include: { translations: true },
           orderBy: { sortOrder: 'asc' },
         });
@@ -79,6 +86,7 @@ export class CategoriesService {
           slug,
           description: copy.description,
           sortOrder: parsed.data.sortOrder ?? 0,
+          isActive: parsed.data.isActive ?? true,
           marketId: market.id,
           kind,
           parentCategoryId,
@@ -158,6 +166,7 @@ export class CategoriesService {
             slug: parsed.data.slug ?? existing.slug,
             description: copy.description,
             sortOrder: parsed.data.sortOrder,
+            isActive: parsed.data.isActive,
             kind,
             parentCategoryId,
           },
@@ -239,6 +248,7 @@ export class CategoriesService {
         slug: existing.slug,
         description: existing.description,
         sortOrder: existing.sortOrder,
+        isActive: existing.isActive,
         marketId: target.id,
         translations: {
           create: existing.translations.map((t) => ({

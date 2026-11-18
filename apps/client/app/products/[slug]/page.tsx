@@ -3,7 +3,7 @@ import { getMessages } from '@/lib/messages';
 import { localizedAbsoluteUrl, seoAlternates, seoImages } from '@/lib/seo';
 import { getStorefrontWindow } from '@/lib/storefront-window';
 import { ProductKind, type ProductDetail, type StoreContactDto } from '@lumea/types';
-import { ProductBadge, ProductImage, Rating } from '@lumea/ui';
+import { ProductBadge, Rating } from '@lumea/ui';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -15,6 +15,7 @@ import { ProductVariantPicker } from '@/components/product-variant-picker';
 import { RelatedProductsSection } from '@/components/related-products-section';
 import { PackContents } from '@/components/pack-contents';
 import { WishlistHeartButton } from '@/components/wishlist-heart-button';
+import { ProductGallery } from '@/components/product-gallery';
 
 export const revalidate = 300;
 
@@ -127,35 +128,14 @@ export default async function ProductPage({ params }: { params: Params }) {
           {t.shop}
         </Link>
         <span className="mx-2">/</span>
-        <Link
-          href={`/shop/category/${product.category.slug}`}
-          className="hover:text-foreground"
-        >
+        <Link href={`/shop/category/${product.category.slug}`} className="hover:text-foreground">
           {product.category.name}
         </Link>
       </p>
 
       <div className="grid gap-10 lg:grid-cols-2">
         <div>
-          <ProductImage
-            src={primary?.url}
-            alt={primary?.alt ?? product.name}
-            className="rounded-md"
-            priority
-          />
-          {images.length > 1 && (
-            <div className="mt-3 grid grid-cols-4 gap-2">
-              {images.map((img) => (
-                <ProductImage
-                  key={img.id}
-                  src={img.url}
-                  alt={img.alt ?? product.name}
-                  className="rounded-sm"
-                  loading="lazy"
-                />
-              ))}
-            </div>
-          )}
+          <ProductGallery images={images} productName={product.name} kind={product.kind} />
         </div>
 
         <div>
@@ -188,11 +168,7 @@ export default async function ProductPage({ params }: { params: Params }) {
           <h1 className="font-display text-4xl text-foreground md:text-5xl">{product.name}</h1>
           {product.averageRating != null && (
             <div className="mt-3">
-              <Rating
-                value={product.averageRating}
-                count={product.reviewCount}
-                size="md"
-              />
+              <Rating value={product.averageRating} count={product.reviewCount} size="md" />
             </div>
           )}
           {product.shortDescription && (
@@ -205,6 +181,7 @@ export default async function ProductPage({ params }: { params: Params }) {
               variants={product.variants}
               currency={product.currency}
               initialVariantId={defaultVariant?.id}
+              isIncoming={product.isIncoming}
               lowStockThreshold={lowStockThreshold}
               competitorPriceAmount={product.competitorPriceAmount}
               competitorPriceSource={product.competitorPriceSource}

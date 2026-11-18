@@ -170,8 +170,26 @@ export type CatalogCategory = {
   description?: string | null;
   kind?: 'CATEGORY' | 'PROBLEM';
   parentCategoryId?: string | null;
+  isActive?: boolean;
   locale?: Locale;
   translations?: CategoryTranslationDto[];
+};
+
+export type CatalogTaxonomyItem = {
+  id: string;
+  name: string;
+  slug: string;
+  description?: string | null;
+  sortOrder: number;
+  isActive?: boolean;
+  departmentId?: string | null;
+};
+
+export type CatalogTaxonomy = {
+  departments: CatalogTaxonomyItem[];
+  productTypes: CatalogTaxonomyItem[];
+  concerns: CatalogTaxonomyItem[];
+  ingredients: CatalogTaxonomyItem[];
 };
 
 export type CatalogBrand = {
@@ -180,6 +198,9 @@ export type CatalogBrand = {
   slug: string;
   description?: string | null;
   imageUrl?: string | null;
+  isActive?: boolean;
+  sortOrder?: number;
+  productCount?: number;
   locale?: Locale;
   translations?: BrandTranslationDto[];
 };
@@ -253,6 +274,10 @@ export type ProductListItem = {
   shortDescription?: string | null;
   category: CatalogCategory;
   problemCategories?: CatalogCategory[];
+  department?: CatalogTaxonomyItem | null;
+  productTypes?: CatalogTaxonomyItem[];
+  skinConcerns?: CatalogTaxonomyItem[];
+  ingredients?: CatalogTaxonomyItem[];
   brand: CatalogBrand;
   priceFrom: number;
   compareAtFrom?: number | null;
@@ -292,6 +317,10 @@ export type ProductDetail = {
   competitorPriceCheckedAt?: string | null;
   category: CatalogCategory;
   problemCategories?: CatalogCategory[];
+  department?: CatalogTaxonomyItem | null;
+  productTypes?: CatalogTaxonomyItem[];
+  skinConcerns?: CatalogTaxonomyItem[];
+  ingredients?: CatalogTaxonomyItem[];
   brand: CatalogBrand;
   currency: Currency;
   locale?: Locale;
@@ -622,6 +651,7 @@ export type WishlistItemDto = {
   compareAtFrom?: number | null;
   currency: Currency;
   inStock: boolean;
+  isIncoming?: boolean;
   /** Preferred variant for “Add to bag” (active in-stock, else first active). */
   defaultVariantId?: string | null;
   createdAt: string;
@@ -930,6 +960,9 @@ export type StoreSettingsDto = {
   customerOrderEmailsEnabled: boolean;
   adminOrderEmailsEnabled: boolean;
   adminStockEmailsEnabled: boolean;
+  adminHelpNotesEnabled: boolean;
+  adminInsightsEnabled: boolean;
+  adminInsightEmailsEnabled: boolean;
 };
 
 export type StoreContactDto = {
@@ -1233,6 +1266,9 @@ export type StockNotifyListResponse = {
 export type StockNotifySubscribeResponse = {
   ok: boolean;
   alreadySubscribed?: boolean;
+  requiresVerification?: boolean;
+  productId?: string;
+  variantId?: string | null;
 };
 
 export enum EmailLogStatus {

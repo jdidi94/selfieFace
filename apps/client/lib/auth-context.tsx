@@ -1,5 +1,7 @@
 'use client';
 
+import { authSessionRequest } from './auth-session-request';
+
 import type { AuthUser } from '@lumea/types';
 import {
   createContext,
@@ -8,6 +10,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
   type ReactNode,
 } from 'react';
 
@@ -32,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const sessionRevision = useRef(0);
 
   const applySession = useCallback((session: { accessToken: string; user: AuthUser }) => {
     setAccessToken(session.accessToken);
@@ -39,23 +43,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
-    const res = await fetch('/api/auth/refresh', { method: 'POST' });
+    const revision = sessionRevision.current;
+    const res = await authSessionRequest('/api/auth/refresh', { method: 'POST' });
+    if (revision !== sessionRevision.current) return;
     if (!res.ok) {
+      if (res.status !== 401 && res.status !== 403) return;
       setAccessToken(null);
       setUser(null);
       return;
     }
     const data = (await res.json()) as { accessToken: string; user: AuthUser };
+    if (revision !== sessionRevision.current) return;
     applySession(data);
   }, [applySession]);
 
   useEffect(() => {
-    void refresh().finally(() => setLoading(false));
+    void refresh().catch(() => {}).finally(() => setLoading(false));
   }, [refresh]);
 
   const login = useCallback(
     async (email: string, password: string) => {
-      const res = await fetch('/api/auth/login', {
+      sessionRevision.current += 1;
+      const res = await authSessionRequest('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -80,7 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       firstName?: string;
       lastName?: string;
     }) => {
-      const res = await fetch('/api/auth/register', {
+      sessionRevision.current += 1;
+      const res = await authSessionRequest('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
@@ -99,7 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    sessionRevision.current += 1;
+    await authSessionRequest('/api/auth/logout', { method: 'POST' });
     setAccessToken(null);
     setUser(null);
   }, []);

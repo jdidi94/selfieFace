@@ -58,6 +58,10 @@ type PackComponentWithVariant = PackComponent & {
 type ProductWithRelations = Product & {
   category: CategoryWithTranslations;
   problemCategories?: CategoryWithTranslations[];
+  department?: { id: string; name: string; slug: string; description: string | null; sortOrder: number; isActive: boolean; translations: { locale: string; name: string; description: string | null }[] } | null;
+  productTypes?: { id: string; name: string; slug: string; description: string | null; sortOrder: number; isActive: boolean; departmentId: string | null; translations: { locale: string; name: string; description: string | null }[] }[];
+  skinConcerns?: { id: string; name: string; slug: string; description: string | null; sortOrder: number; isActive: boolean; translations: { locale: string; name: string; description: string | null }[] }[];
+  ingredients?: { id: string; name: string; slug: string; description: string | null; sortOrder: number; isActive: boolean; translations: { locale: string; name: string; description: string | null }[] }[];
   brand: BrandWithTranslations;
   market?: Pick<Market, 'code'> | null;
   variants: VariantWithPrices[];
@@ -120,6 +124,7 @@ export function mapCategory(
     description: t?.description ?? c.description,
     kind: c.kind,
     parentCategoryId: c.parentCategoryId,
+    isActive: c.isActive,
     locale,
     translations,
   };
@@ -145,6 +150,8 @@ export function mapBrand(
     slug: b.slug,
     description: t?.description ?? b.description,
     imageUrl: b.imageUrl ?? null,
+    isActive: b.isActive,
+    sortOrder: b.sortOrder,
     locale,
     translations,
   };
@@ -297,7 +304,7 @@ export function buildProductLabels(opts: {
   if (opts.averageRating != null && opts.averageRating >= 4 && (opts.reviewCount ?? 0) >= 1) {
     labels.push({ kind: 'top_rated' });
   }
-  if (!opts.inStock) labels.push({ kind: 'out_of_stock' });
+  if (!opts.inStock && !opts.isIncoming) labels.push({ kind: 'out_of_stock' });
   return labels;
 }
 
@@ -338,7 +345,9 @@ export function mapProductListItem(
   const tag = campaignTag(p);
   const averageRating = rating?.averageRating ?? null;
   const reviewCount = rating?.reviewCount ?? 0;
-  const inStock = packQty != null ? packQty > 0 : activeVariants.length > 0;
+  // Incoming items are announced through Notify Me and cannot be purchased,
+  // even if their variants still carry stock from a previous state.
+  const inStock = !p.isIncoming && (packQty != null ? packQty > 0 : activeVariants.length > 0);
   const labels = buildProductLabels({
     isIncoming: p.isIncoming,
     inStock,
@@ -428,6 +437,10 @@ export function mapProductDetail(
     problemCategories: (p.problemCategories ?? []).map((category) =>
       mapCategory(category, locale, includeAllTranslations),
     ),
+    department: p.department ? { id: p.department.id, name: pickTranslation(p.department.translations, locale)?.name ?? p.department.name, slug: p.department.slug, description: p.department.description, sortOrder: p.department.sortOrder, isActive: p.department.isActive } : null,
+    productTypes: (p.productTypes ?? []).map((item) => ({ id: item.id, name: pickTranslation(item.translations, locale)?.name ?? item.name, slug: item.slug, description: item.description, sortOrder: item.sortOrder, isActive: item.isActive, departmentId: item.departmentId })),
+    skinConcerns: (p.skinConcerns ?? []).map((item) => ({ id: item.id, name: pickTranslation(item.translations, locale)?.name ?? item.name, slug: item.slug, description: item.description, sortOrder: item.sortOrder, isActive: item.isActive })),
+    ingredients: (p.ingredients ?? []).map((item) => ({ id: item.id, name: pickTranslation(item.translations, locale)?.name ?? item.name, slug: item.slug, description: item.description, sortOrder: item.sortOrder, isActive: item.isActive })),
     brand: mapBrand(p.brand, locale, includeAllTranslations),
     currency,
     locale,

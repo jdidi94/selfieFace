@@ -2,9 +2,9 @@ import type { Currency, Locale } from '@lumea/types';
 import { formatMoney } from '@lumea/utils';
 
 const arabicCurrencyLabels: Record<Currency, string> = {
-  USD: 'دولار أمريكي',
-  TND: 'دينار تونسي',
-  AED: 'درهم إماراتي',
+  USD: 'د.أ',
+  TND: 'د.ت',
+  AED: 'د.إ',
 };
 
 export function formatOrderMoney(amount: number, currency: Currency, locale: Locale) {

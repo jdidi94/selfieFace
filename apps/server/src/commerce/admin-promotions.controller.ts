@@ -16,6 +16,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { UserTypesGuard } from '../auth/guards/user-types.guard';
 import { AdminMarketCode } from '../markets/admin-market.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/auth.types';
 import { PromotionsService } from './promotions.service';
 
 @Controller('admin/promotions')
@@ -44,8 +46,8 @@ export class AdminPromotionsController {
 
   @Patch(':id')
   @Permissions('coupons.update')
-  update(@Param('id') id: string, @Body() body: unknown) {
-    return this.promotionsService.update(id, body);
+  update(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: RequestUser) {
+    return this.promotionsService.update(id, body, user.sub);
   }
 
   @Delete(':id')

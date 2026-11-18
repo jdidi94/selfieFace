@@ -3,6 +3,7 @@
 import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
 import { FormErrorBanner, FieldError } from '@/components/form-errors';
 import { BrandPicker } from '@/components/brand-picker';
+import { ContextualHelp } from '@/components/contextual-help';
 import {
   PackComponentPicker,
   type PackComponentSelection,
@@ -17,6 +18,7 @@ import {
   CURRENCY_BY_MARKET,
   type CatalogBrand,
   type CatalogCategory,
+  type CatalogTaxonomyItem,
   type CatalogCopyResult,
   type ProductDetail,
   type PromotionDto,
@@ -57,6 +59,18 @@ type GalleryImage = {
   url: string;
 };
 
+function TaxonomyAssignments({ title, items, selected, onChange }: { title: string; items: CatalogTaxonomyItem[]; selected: string[]; onChange: (ids: string[]) => void }) {
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium">{title}</legend>
+      <div className="grid max-h-40 gap-2 overflow-y-auto rounded-md border border-border p-3 sm:grid-cols-2">
+        {items.map((item) => <label key={item.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={selected.includes(item.id)} onChange={(event) => onChange(event.target.checked ? [...selected, item.id] : selected.filter((id) => id !== item.id))} />{item.name}</label>)}
+        {!items.length ? <span className="text-xs text-muted-foreground">No active taxonomy items.</span> : null}
+      </div>
+    </fieldset>
+  );
+}
+
 const emptyCopy = (): LocaleCopy => ({
   name: '',
   shortDescription: '',
@@ -78,6 +92,10 @@ export function ProductForm({ productId }: Props) {
   const currency = CURRENCY_BY_MARKET[market];
   const router = useRouter();
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [departments, setDepartments] = useState<CatalogTaxonomyItem[]>([]);
+  const [productTypes, setProductTypes] = useState<CatalogTaxonomyItem[]>([]);
+  const [concerns, setConcerns] = useState<CatalogTaxonomyItem[]>([]);
+  const [ingredients, setIngredients] = useState<CatalogTaxonomyItem[]>([]);
   const [initialBrand, setInitialBrand] = useState<CatalogBrand | null>(null);
   const [promotions, setPromotions] = useState<PromotionDto[]>([]);
   const [loading, setLoading] = useState(!!productId);
@@ -92,6 +110,10 @@ export function ProductForm({ productId }: Props) {
   const [packComponents, setPackComponents] = useState<PackComponentSelection[]>([]);
   const [categoryId, setCategoryId] = useState('');
   const [problemCategoryIds, setProblemCategoryIds] = useState<string[]>([]);
+  const [departmentId, setDepartmentId] = useState('');
+  const [productTypeIds, setProductTypeIds] = useState<string[]>([]);
+  const [skinConcernIds, setSkinConcernIds] = useState<string[]>([]);
+  const [ingredientIds, setIngredientIds] = useState<string[]>([]);
   const [brandId, setBrandId] = useState('');
   const [isIncoming, setIsIncoming] = useState(false);
   const [incomingAt, setIncomingAt] = useState('');
@@ -125,9 +147,17 @@ export function ProductForm({ productId }: Props) {
     if (authLoading || !accessToken) return;
     void Promise.all([
       adminFetch<CatalogCategory[]>('/admin/categories', accessToken),
+      adminFetch<CatalogTaxonomyItem[]>('/admin/taxonomy/departments', accessToken),
+      adminFetch<CatalogTaxonomyItem[]>('/admin/taxonomy/productTypes', accessToken),
+      adminFetch<CatalogTaxonomyItem[]>('/admin/taxonomy/concerns', accessToken),
+      adminFetch<CatalogTaxonomyItem[]>('/admin/taxonomy/ingredients', accessToken),
       adminFetch<PromotionDto[]>('/admin/promotions', accessToken).catch(() => [] as PromotionDto[]),
-    ]).then(([cats, promos]) => {
+    ]).then(([cats, deps, types, skinConcerns, ingredientItems, promos]) => {
       setCategories(cats);
+      setDepartments(deps);
+      setProductTypes(types);
+      setConcerns(skinConcerns);
+      setIngredients(ingredientItems);
       setPromotions(promos.filter((p) => p.isActive));
       const mainCategories = cats.filter((category) => category.kind !== 'PROBLEM');
       if (!categoryId && mainCategories[0]) setCategoryId(mainCategories[0].id);
@@ -154,6 +184,10 @@ export function ProductForm({ productId }: Props) {
         );
         setCategoryId(p.category.id);
         setProblemCategoryIds((p.problemCategories ?? []).map((category) => category.id));
+        setDepartmentId(p.department?.id ?? '');
+        setProductTypeIds((p.productTypes ?? []).map((item) => item.id));
+        setSkinConcernIds((p.skinConcerns ?? []).map((item) => item.id));
+        setIngredientIds((p.ingredients ?? []).map((item) => item.id));
         setBrandId(p.brand.id);
         setInitialBrand({
           id: p.brand.id,
@@ -343,6 +377,10 @@ export function ProductForm({ productId }: Props) {
       kind,
       categoryId,
       problemCategoryIds,
+      departmentId: departmentId || null,
+      productTypeIds,
+      skinConcernIds,
+      ingredientIds,
       brandId,
       isIncoming,
       incomingAt: incomingAt ? new Date(incomingAt).toISOString() : null,
@@ -472,7 +510,7 @@ export function ProductForm({ productId }: Props) {
             </select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="category">Category</Label>
+            <Label htmlFor="category">Category <ContextualHelp fieldKey="product.category" /></Label>
             <select
               id="category"
               className="h-10 w-full rounded-md border border-input bg-surface px-3 text-sm"
@@ -520,6 +558,16 @@ export function ProductForm({ productId }: Props) {
               </div>
             </fieldset>
           ) : null}
+          <div className="space-y-2">
+            <Label htmlFor="department">Department</Label>
+            <select id="department" className="h-10 w-full rounded-md border border-input bg-surface px-3 text-sm" value={departmentId} onChange={(event) => { setDepartmentId(event.target.value); setProductTypeIds([]); }}>
+              <option value="">Unassigned</option>
+              {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </div>
+          <TaxonomyAssignments title="Product types" items={productTypes.filter((item) => !item.departmentId || item.departmentId === departmentId)} selected={productTypeIds} onChange={setProductTypeIds} />
+          <TaxonomyAssignments title="Skin concerns" items={concerns} selected={skinConcernIds} onChange={setSkinConcernIds} />
+          <TaxonomyAssignments title="Ingredients" items={ingredients} selected={ingredientIds} onChange={setIngredientIds} />
           <BrandPicker
             accessToken={accessToken}
             value={brandId}
@@ -608,7 +656,7 @@ export function ProductForm({ productId }: Props) {
             {([Locale.EN, Locale.AR, Locale.FR] as const).map((locale) => (
               <TabsContent key={locale} value={locale} className="space-y-3 pt-3">
                 <div className="space-y-2">
-                  <Label>Name {locale === Locale.EN ? '(required)' : ''}</Label>
+                  <Label>Name {locale === Locale.EN ? '(required)' : ''} <ContextualHelp fieldKey="product.name" /></Label>
                   <Input
                     value={copy[locale].name}
                     onChange={(e) => updateCopy(locale, { name: e.target.value })}
@@ -625,7 +673,7 @@ export function ProductForm({ productId }: Props) {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Description</Label>
+                  <Label>Description <ContextualHelp fieldKey="product.description" /></Label>
                   <Textarea
                     value={copy[locale].description}
                     onChange={(e) => updateCopy(locale, { description: e.target.value })}
@@ -673,7 +721,7 @@ export function ProductForm({ productId }: Props) {
               <Input value={sku} onChange={(e) => setSku(e.target.value)} required />
             </div>
             <div className="space-y-2">
-              <Label>Price ({currency})</Label>
+              <Label>Price ({currency}) <ContextualHelp fieldKey="product.price" /></Label>
               <Input value={price} onChange={(e) => setPrice(e.target.value)} required />
             </div>
             <div className="space-y-2">
@@ -715,7 +763,7 @@ export function ProductForm({ productId }: Props) {
               </p>
             </div>
             <div className="space-y-2">
-              <Label>Stock</Label>
+              <Label>Stock <ContextualHelp fieldKey="product.stock" /></Label>
               <Input value={stock} onChange={(e) => setStock(e.target.value)} required />
             </div>
           </div>
@@ -757,7 +805,7 @@ export function ProductForm({ productId }: Props) {
         <div className="space-y-3 rounded-lg border border-border p-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <p className="text-sm font-medium">Gallery images</p>
+              <p className="text-sm font-medium">Gallery images <ContextualHelp fieldKey="product.images" /></p>
               <p className="text-xs text-muted-foreground">
                 Add many images (≤5 MB each). First image is the card cover; reorder with arrows.
               </p>
@@ -871,6 +919,7 @@ export function ProductForm({ productId }: Props) {
             name={copy[Locale.EN].name.trim() || 'Product name'}
             href="#"
             imageUrl={previewImage}
+            imageFallback={kind === 'PACK' ? 'pack' : 'product'}
             priceFrom={priceMinor}
             compareAtFrom={
               compareMinor != null && compareMinor > priceMinor ? compareMinor : null

@@ -100,6 +100,7 @@ export const categoryUpsertSchema = z
     slug: slugSchema.optional(),
     description: z.string().optional().nullable(),
     sortOrder: z.number().int().optional(),
+    isActive: z.boolean().optional(),
     kind: z.enum(['CATEGORY', 'PROBLEM']).optional(),
     parentCategoryId: z.string().min(1).nullable().optional(),
     translations: z.array(categoryTranslationSchema).optional(),
@@ -152,6 +153,8 @@ export const brandUpsertSchema = z
       .union([z.string().url(), z.literal(''), z.null()])
       .optional()
       .transform((v) => (v === '' ? null : v)),
+    sortOrder: z.number().int().optional(),
+    isActive: z.boolean().optional(),
     translations: z.array(brandTranslationSchema).optional(),
   })
   .superRefine((val, ctx) => {
@@ -212,6 +215,10 @@ export const productFieldsSchema = z.object({
   translations: z.array(productTranslationSchema).optional(),
   categoryId: z.string().min(1),
   problemCategoryIds: z.array(z.string().min(1)).max(24).optional(),
+  departmentId: z.string().min(1).nullable().optional(),
+  productTypeIds: z.array(z.string().min(1)).max(24).optional(),
+  skinConcernIds: z.array(z.string().min(1)).max(24).optional(),
+  ingredientIds: z.array(z.string().min(1)).max(24).optional(),
   brandId: z.string().min(1),
   variants: z.array(variantInputSchema).min(1),
   imageMediaIds: z.array(z.string()).optional(),
@@ -277,6 +284,27 @@ export const productBulkTagsSchema = z
     }
   });
 
+export const productBulkUpdateSchema = z
+  .object({
+    productIds: z.array(z.string().min(1)).min(1).max(100),
+    status: z.enum(['DRAFT', 'ACTIVE', 'ARCHIVED']).optional(),
+    categoryId: z.string().min(1).optional(),
+    brandId: z.string().min(1).optional(),
+    addTags: z.array(z.string().min(1).max(40)).max(24).optional(),
+    removeTags: z.array(z.string().min(1).max(40)).max(24).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.status == null &&
+      value.categoryId == null &&
+      value.brandId == null &&
+      !value.addTags?.length &&
+      !value.removeTags?.length
+    ) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Choose at least one change' });
+    }
+  });
+
 const queryFlagSchema = z
   .union([z.literal('1'), z.literal('true'), z.literal('yes'), z.literal('on'), z.boolean()])
   .optional()
@@ -284,6 +312,10 @@ const queryFlagSchema = z
 
 export const productListQuerySchema = z.object({
   q: z.string().optional(),
+  department: slugSchema.optional(),
+  productType: slugSchema.optional(),
+  concern: slugSchema.optional(),
+  ingredient: slugSchema.optional(),
   category: z.string().optional(),
   problemCategory: z.string().optional(),
   brand: z.string().optional(),
@@ -615,6 +647,9 @@ export const storeSettingsUpdateSchema = z.object({
   customerOrderEmailsEnabled: z.boolean().optional(),
   adminOrderEmailsEnabled: z.boolean().optional(),
   adminStockEmailsEnabled: z.boolean().optional(),
+  adminHelpNotesEnabled: z.boolean().optional(),
+  adminInsightsEnabled: z.boolean().optional(),
+  adminInsightEmailsEnabled: z.boolean().optional(),
   shippingMethods: z
     .array(
       z.object({
@@ -637,6 +672,7 @@ export type BrandUpsertInput = z.infer<typeof brandUpsertSchema>;
 export type ProductCreateInput = z.infer<typeof productCreateSchema>;
 export type ProductUpdateInput = z.infer<typeof productUpdateSchema>;
 export type ProductBulkTagsInput = z.infer<typeof productBulkTagsSchema>;
+export type ProductBulkUpdateInput = z.infer<typeof productBulkUpdateSchema>;
 export type ProductListQuery = z.infer<typeof productListQuerySchema>;
 export type ProductAdminListQuery = z.infer<typeof productAdminListQuerySchema>;
 export type InventoryAdjustInput = z.infer<typeof inventoryAdjustSchema>;

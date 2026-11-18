@@ -29,6 +29,7 @@ import { Button, ErrorState, Input, Label, LoadingState, cn } from '@lumea/ui';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { io } from 'socket.io-client';
 
 type Step = 'contact' | 'address' | 'delivery' | 'payment';
 
@@ -57,6 +58,23 @@ const CHECKOUT_COUNTRIES = [
   'CA',
   'CH',
 ] as const;
+
+const DIALING_CODE_BY_COUNTRY: Record<string, string> = {
+  TN: '+216',
+  AE: '+971',
+  SA: '+966',
+  US: '+1',
+  CA: '+1',
+  FR: '+33',
+  DZ: '+213',
+  MA: '+212',
+  BE: '+32',
+  DE: '+49',
+  IT: '+39',
+  ES: '+34',
+  GB: '+44',
+  CH: '+41',
+};
 
 function readCookie(name: string) {
   if (typeof document === 'undefined') return null;
@@ -171,6 +189,10 @@ export default function CheckoutPage() {
   const [fieldErrors, setFieldErrors] = useState<AddressFieldErrors>({});
   const [paymentMethod, setPaymentMethod] = useState<'COD' | 'CARD'>('COD');
   const [paymentOptions, setPaymentOptions] = useState<PaymentOptionsDto | null>(null);
+  const [paymentOptionsLoading, setPaymentOptionsLoading] = useState(true);
+  const [quoteLoading, setQuoteLoading] = useState(true);
+  const [quoteReady, setQuoteReady] = useState(false);
+  const [quoteRefreshSeq, setQuoteRefreshSeq] = useState(0);
   const [checkoutLoadError, setCheckoutLoadError] = useState(false);
   const [savedAddresses, setSavedAddresses] = useState<AddressDto[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | 'new' | null>(null);
@@ -181,8 +203,7 @@ export default function CheckoutPage() {
     Partial<Record<'terms' | 'returns', LegalDocumentDto>>
   >({});
 
-  const showAddressFields =
-    isGuest || selectedAddressId === 'new' || savedAddresses.length === 0;
+  const showAddressFields = isGuest || selectedAddressId === 'new' || savedAddresses.length === 0;
 
   const countryOptions = useMemo(() => {
     const codes = new Set<string>(CHECKOUT_COUNTRIES);
@@ -249,8 +270,12 @@ export default function CheckoutPage() {
   }, [accessToken, isGuest]);
 
   useEffect(() => {
-    void fetch(`${apiUrl}/checkout/payment-options?currency=${encodeURIComponent(currency)}`)
+    let active = true;
+    void fetch(`${apiUrl}/checkout/payment-options?currency=${encodeURIComponent(currency)}`, {
+      cache: 'no-store',
+    })
       .then(async (res) => {
+        if (!active) return;
         if (!res.ok) {
           setCheckoutLoadError(true);
           return;
@@ -262,9 +287,79 @@ export default function CheckoutPage() {
         else if (opts.cardEnabled) setPaymentMethod('CARD');
       })
       .catch(() => {
-        setCheckoutLoadError(true);
+        if (active) setCheckoutLoadError(true);
+      })
+      .finally(() => {
+        if (active) setPaymentOptionsLoading(false);
       });
+    return () => {
+      active = false;
+    };
   }, [currency]);
+
+  useEffect(() => {
+    let active = true;
+    let running = false;
+    let queued = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const controller = new AbortController();
+    const updateOptions = async () => {
+      try {
+        const res = await fetch(
+          `${apiUrl}/checkout/payment-options?currency=${encodeURIComponent(currency)}`,
+          { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]) },
+        );
+        if (!res.ok) throw new Error('Payment options unavailable');
+        const next = (await res.json()) as PaymentOptionsDto;
+        if (!active) return;
+        setPaymentOptions(next);
+        setCheckoutLoadError(false);
+        setPaymentMethod((current) => {
+          if (current === 'COD' && next.cashEnabled) return current;
+          if (current === 'CARD' && next.cardEnabled) return current;
+          return next.cashEnabled ? 'COD' : 'CARD';
+        });
+      } catch {
+        // Keep the last confirmed choices if a background refresh is interrupted.
+      }
+    };
+    const refreshCheckout = () => {
+      if (!active || document.visibilityState !== 'visible') return;
+      queued = true;
+      if (running) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        queued = false;
+        running = true;
+        void Promise.all([updateOptions(), refresh()]).finally(() => {
+          running = false;
+          if (!active) return;
+          setQuoteRefreshSeq((value) => value + 1);
+          if (queued) refreshCheckout();
+        });
+      }, 150);
+    };
+    const socketOrigin = new URL(apiUrl).origin;
+    const socket = io(`${socketOrigin}/storefront-checkout`, {
+      auth: { currency },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+    });
+    socket.on('checkout:changed', refreshCheckout);
+    const interval = window.setInterval(refreshCheckout, 20_000);
+    window.addEventListener('focus', refreshCheckout);
+    document.addEventListener('visibilitychange', refreshCheckout);
+    return () => {
+      active = false;
+      controller.abort();
+      clearTimeout(timer);
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refreshCheckout);
+      document.removeEventListener('visibilitychange', refreshCheckout);
+      socket.off('checkout:changed', refreshCheckout);
+      socket.disconnect();
+    };
+  }, [currency, refresh]);
 
   useEffect(() => {
     if (isGuest && paymentMethod === 'CARD' && paymentOptions?.cashEnabled) {
@@ -301,13 +396,16 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     const countryCode = country.trim().toUpperCase();
-    if (!cart?.id || countryCode.length !== 2 || (step !== 'address' && step !== 'delivery')) {
+    if (!cart?.id || cart.items.length === 0 || countryCode.length !== 2) {
+      setQuoteLoading(false);
       return;
     }
-    const guestToken =
-      readCookie('selfieface_guest_token') ?? readCookie('lumea_guest_token');
+    const guestToken = readCookie('selfieface_guest_token') ?? readCookie('lumea_guest_token');
     let cancelled = false;
+    const controller = new AbortController();
+    setQuoteLoading(true);
     void fetch(`${apiUrl}/checkout/quote`, {
+      signal: controller.signal,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -331,7 +429,9 @@ export default function CheckoutPage() {
           return;
         }
         const next = (await res.json()) as CheckoutTotalsDto;
+        if (cancelled) return;
         setTotals(next);
+        setQuoteReady(true);
         setError(null);
         const selectedId = next.shipping.methodId ?? next.shippingMethods[0]?.id ?? null;
         if (selectedId && selectedId !== shippingMethodId) {
@@ -340,11 +440,15 @@ export default function CheckoutPage() {
       })
       .catch(() => {
         if (!cancelled) setError(t.quoteFailed);
+      })
+      .finally(() => {
+        if (!cancelled) setQuoteLoading(false);
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [accessToken, cart?.id, country, currency, shippingMethodId, step, t.quoteFailed]);
+  }, [accessToken, cart?.id, cart?.items.length, country, currency, quoteRefreshSeq, shippingMethodId, t.quoteFailed]);
 
   function goNext() {
     const idx = steps.indexOf(step);
@@ -406,10 +510,7 @@ export default function CheckoutPage() {
       if (Object.keys(contactErrors).length > 0) {
         setFieldErrors(contactErrors);
         setError(
-          contactErrors.email ??
-            contactErrors.phone ??
-            contactErrors.fullName ??
-            t.checkoutFailed,
+          contactErrors.email ?? contactErrors.phone ?? contactErrors.fullName ?? t.checkoutFailed,
         );
         setStep('contact');
         return;
@@ -435,8 +536,66 @@ export default function CheckoutPage() {
     setPending(true);
     setError(null);
     try {
-      const guestToken =
-      readCookie('selfieface_guest_token') ?? readCookie('lumea_guest_token');
+      const guestToken = readCookie('selfieface_guest_token') ?? readCookie('lumea_guest_token');
+      const freshCart = await refresh();
+      if (!freshCart) throw new Error(t.checkoutChanged);
+      const cartSignature = (value: typeof cart) =>
+        value?.items
+          .map((item) => `${item.variantId}:${item.quantity}:${item.unitPrice}`)
+          .sort()
+          .join('|');
+      if (cartSignature(freshCart) !== cartSignature(cart)) {
+        throw new Error(t.checkoutChanged);
+      }
+      const [optionsResponse, quoteResponse] = await Promise.all([
+        fetch(`${apiUrl}/checkout/payment-options?currency=${encodeURIComponent(currency)}`, {
+          cache: 'no-store',
+        }),
+        fetch(`${apiUrl}/checkout/quote`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-cart-id': cart.id,
+            ...(guestToken ? { 'x-guest-token': guestToken } : {}),
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          },
+          body: JSON.stringify({
+            cartId: cart.id,
+            country: country.trim().toUpperCase(),
+            currency,
+            shippingMethodId,
+          }),
+        }),
+      ]);
+      if (!optionsResponse.ok || !quoteResponse.ok) {
+        throw new Error(t.quoteFailed);
+      }
+      const latestOptions = (await optionsResponse.json()) as PaymentOptionsDto;
+      const latestQuote = (await quoteResponse.json()) as CheckoutTotalsDto;
+      setPaymentOptions(latestOptions);
+      setTotals(latestQuote);
+      setQuoteReady(true);
+      const selectedStillAvailable = latestQuote.shippingMethods.some(
+        (methodOption) => methodOption.id === shippingMethodId,
+      );
+      if (latestQuote.shippingMethods.length > 0 && !selectedStillAvailable) {
+        const replacement = latestQuote.shipping.methodId ?? latestQuote.shippingMethods[0]?.id ?? null;
+        setShippingMethodId(replacement);
+        throw new Error(t.selectShippingMethod);
+      }
+      if (totals && latestQuote.total !== totals.total) {
+        const replacement = latestQuote.shipping.methodId ?? shippingMethodId;
+        if (replacement) setShippingMethodId(replacement);
+        throw new Error(t.checkoutChanged);
+      }
+      if (method === 'COD' && !latestOptions.cashEnabled) {
+        setPaymentMethod(latestOptions.cardEnabled ? 'CARD' : 'COD');
+        throw new Error(t.paymentCodDisabled);
+      }
+      if (method === 'CARD' && !latestOptions.cardEnabled) {
+        setPaymentMethod(latestOptions.cashEnabled ? 'COD' : 'CARD');
+        throw new Error(t.paymentCardDisabled);
+      }
       const idempotencyKey = getOrCreateCheckoutIdempotencyKey(cart.id);
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -569,9 +728,15 @@ export default function CheckoutPage() {
     router.push(`/checkout/confirmation?orderId=${orderId}`);
   }
 
-  if (authLoading || cartLoading) return <LoadingState className="py-24" />;
+  if (
+    authLoading ||
+    cartLoading ||
+    (cart?.items.length && (paymentOptionsLoading || (quoteLoading && !quoteReady)))
+  ) {
+    return <LoadingState className="py-24" />;
+  }
 
-  if (cartError || checkoutLoadError) {
+  if ((cartError && !cart) || checkoutLoadError || (cart?.items.length && !quoteReady)) {
     return (
       <main className="mx-auto max-w-lg px-6 py-16">
         <ErrorState
@@ -583,6 +748,8 @@ export default function CheckoutPage() {
               onClick={() => {
                 setCheckoutLoadError(false);
                 void refresh();
+                setQuoteLoading(true);
+                setQuoteRefreshSeq((value) => value + 1);
                 void fetch(
                   `${apiUrl}/checkout/payment-options?currency=${encodeURIComponent(currency)}`,
                 )
@@ -609,7 +776,9 @@ export default function CheckoutPage() {
     return (
       <main className="mx-auto grid max-w-5xl gap-10 px-6 py-12 lg:grid-cols-2">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t.checkoutTitle}</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            {t.checkoutTitle}
+          </p>
           <h1 className="mt-2 font-display text-4xl">{t.paymentTitle}</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {t.paymentSecure}
@@ -689,9 +858,7 @@ export default function CheckoutPage() {
               const nextErrors = validateContactFields(t, { fullName, phone, email });
               setFieldErrors(nextErrors);
               if (Object.keys(nextErrors).length > 0) {
-                setError(
-                  nextErrors.fullName ?? nextErrors.phone ?? nextErrors.email ?? null,
-                );
+                setError(nextErrors.fullName ?? nextErrors.phone ?? nextErrors.email ?? null);
                 return;
               }
               goNext();
@@ -725,7 +892,7 @@ export default function CheckoutPage() {
                   setPhone(e.target.value);
                   setFieldErrors((prev) => ({ ...prev, phone: undefined }));
                 }}
-                placeholder="+216…"
+                placeholder={`${DIALING_CODE_BY_COUNTRY[country.trim().toUpperCase()] ?? '+'}…`}
                 aria-invalid={Boolean(fieldErrors.phone)}
                 autoComplete="tel"
               />
@@ -905,6 +1072,7 @@ export default function CheckoutPage() {
                         value={phone}
                         onChange={(e) => setPhone(e.target.value)}
                         autoComplete="tel"
+                        placeholder={`${DIALING_CODE_BY_COUNTRY[country.trim().toUpperCase()] ?? '+'}…`}
                       />
                     </div>
                     <label className="flex items-center gap-2 text-sm">
@@ -952,12 +1120,9 @@ export default function CheckoutPage() {
 
               <fieldset className="mt-4 space-y-2">
                 <legend className="text-sm font-medium text-foreground">{t.shippingMethod}</legend>
-                {totals?.amountUntilFreeShipping != null &&
-                totals.amountUntilFreeShipping > 0 ? (
+                {totals?.amountUntilFreeShipping != null && totals.amountUntilFreeShipping > 0 ? (
                   <p className="text-xs text-muted-foreground">
-                    {t.freeShippingRemaining(
-                      formatMoney(totals.amountUntilFreeShipping, currency),
-                    )}
+                    {t.freeShippingRemaining(formatMoney(totals.amountUntilFreeShipping, currency))}
                   </p>
                 ) : totals && totals.freeShippingThreshold > 0 ? (
                   <p className="text-xs text-muted-foreground">{t.freeShippingUnlocked}</p>
@@ -990,9 +1155,7 @@ export default function CheckoutPage() {
                         ) : null}
                       </span>
                       <span className="shrink-0 text-sm font-medium">
-                        {method.freeShippingApplied
-                          ? t.free
-                          : formatMoney(method.amount, currency)}
+                        {method.freeShippingApplied ? t.free : formatMoney(method.amount, currency)}
                       </span>
                     </span>
                   </label>
@@ -1106,7 +1269,8 @@ export default function CheckoutPage() {
                       return (
                         <section key={slug}>
                           <h3 className="font-medium text-foreground">
-                            {document?.title ?? (slug === 'terms' ? t.footerTerms : t.footerReturns)}
+                            {document?.title ??
+                              (slug === 'terms' ? t.footerTerms : t.footerReturns)}
                           </h3>
                           <p className="mt-1 whitespace-pre-wrap leading-relaxed">
                             {document?.content ??
@@ -1128,7 +1292,12 @@ export default function CheckoutPage() {
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <div className="sticky bottom-0 z-10 -mx-6 flex gap-3 bg-background/95 px-6 pt-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:static md:mx-0 md:bg-transparent md:p-0 md:backdrop-blur-none">
-              <Button type="button" variant="outline" className="h-auto min-h-12 shrink-0 px-5" onClick={goBack}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-auto min-h-12 shrink-0 px-5"
+                onClick={goBack}
+              >
                 {t.back}
               </Button>
               <Button

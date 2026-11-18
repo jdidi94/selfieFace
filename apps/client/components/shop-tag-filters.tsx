@@ -5,7 +5,7 @@ import { getMessages } from '@/lib/messages';
 import { shopFilterQuery, type ShopFilterValues } from '@/lib/shop-filters';
 import Link from 'next/link';
 
-export function ShopTagFilters({ values }: { values: ShopFilterValues }) {
+export function ShopTagFilters({ values, taxonomyLabels = [], otherLabels = [] }: { values: ShopFilterValues; taxonomyLabels?: { key: 'department' | 'productType' | 'concern' | 'ingredient'; label: string }[]; otherLabels?: { key: 'category' | 'problemCategory' | 'brand'; label: string }[] }) {
   const { locale } = useLocale();
   const t = getMessages(locale);
 
@@ -15,6 +15,8 @@ export function ShopTagFilters({ values }: { values: ShopFilterValues }) {
     active: boolean;
     href: string;
   }[] = [
+    ...taxonomyLabels.map((item) => ({ key: item.key, label: item.label, active: true, href: `/shop?${shopFilterQuery({ ...values, [item.key]: '' }).toString()}` })),
+    ...otherLabels.map((item) => ({ key: item.key, label: item.label, active: true, href: `/shop?${shopFilterQuery({ ...values, [item.key]: '' }).toString()}` })),
     {
       key: 'packs',
       label: t.packsFilter,
@@ -49,6 +51,7 @@ export function ShopTagFilters({ values }: { values: ShopFilterValues }) {
 
   return (
     <div className="mb-4 flex flex-wrap gap-2" aria-label={t.applyFilters}>
+      {taxonomyLabels.length || otherLabels.length || values.minPrice || values.maxPrice || values.minRating || values.q ? <Link href="/shop" className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground">{t.clearAllFilters}</Link> : null}
       {tags.map((tag) => (
         <Link
           key={tag.key}

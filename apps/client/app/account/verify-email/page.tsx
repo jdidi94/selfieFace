@@ -8,7 +8,7 @@ import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 
 function VerifyEmailInner() {
   const searchParams = useSearchParams();
@@ -25,27 +25,37 @@ function VerifyEmailInner() {
   const [resendPending, setResendPending] = useState(false);
   const [resendMessage, setResendMessage] = useState<string | null>(null);
 
+  // Reuse the operation across effect cleanup/replay and access-token rotation.
+  const verification = useRef<{ token: string; result: Promise<{ ok: boolean; message?: string }> } | null>(null);
+  const refreshedToken = useRef<string | null>(null);
+
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/auth/verify-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-        const data = (await res.json()) as { message?: string };
+        if (verification.current?.token !== token) {
+          verification.current = {
+            token,
+            result: fetch('/api/auth/verify-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ token }),
+            }).then(async (res) => ({ ok: res.ok, ...await res.json() as { message?: string } })),
+          };
+        }
+        const data = await verification.current.result;
         if (cancelled) return;
-        if (!res.ok) {
+        if (!data.ok) {
           setStatus('error');
           setMessage(data.message ?? t.verifyEmailInvalid);
           return;
         }
         setStatus('success');
         setMessage(data.message ?? t.verifyEmailSuccess);
-        if (accessToken) {
-          await refreshSession();
+        if (accessToken && refreshedToken.current !== token) {
+          refreshedToken.current = token;
+          await refreshSession().catch(() => {});
         }
       } catch {
         if (!cancelled) {

@@ -1,6 +1,7 @@
+import { FallbackImage } from './fallback-image';
 import type { ReactNode } from 'react';
 import { ProductBadge } from './product-badge';
-import { ProductImage } from './product-image';
+import { ProductImage, type DefaultImageKind } from './product-image';
 import { ProductPrice } from './product-price';
 import { Rating } from './rating';
 import { cn } from './lib/cn';
@@ -14,9 +15,11 @@ export type ProductCardProps = {
   name: string;
   href: string;
   imageUrl?: string | null;
+  imageFallback?: DefaultImageKind;
   priceFrom: number;
   compareAtFrom?: number | null;
   currency?: string;
+  locale?: string;
   /** @deprecated Prefer `labels` */
   badge?: string | null;
   labels?: ProductCardLabel[];
@@ -26,7 +29,9 @@ export type ProductCardProps = {
   reviewCount?: number;
   favoriteSlot?: ReactNode;
   actionsSlot?: ReactNode;
+  layout?: 'grid' | 'list';
   className?: string;
+  imagePriority?: boolean;
   LinkComponent?: (props: { href: string; className?: string; children: ReactNode }) => ReactNode;
 };
 
@@ -34,9 +39,11 @@ export function ProductCard({
   name,
   href,
   imageUrl,
+  imageFallback = 'product',
   priceFrom,
   compareAtFrom,
   currency = 'USD',
+  locale,
   badge,
   labels,
   brandName,
@@ -45,26 +52,39 @@ export function ProductCard({
   reviewCount,
   favoriteSlot,
   actionsSlot,
+  layout = 'grid',
   className,
+  imagePriority,
   LinkComponent,
 }: ProductCardProps) {
   const resolvedLabels: ProductCardLabel[] =
-    labels && labels.length
-      ? labels
-      : badge
-        ? [{ label: badge, variant: 'secondary' }]
-        : [];
+    labels && labels.length ? labels : badge ? [{ label: badge, variant: 'secondary' }] : [];
 
   const Link = LinkComponent ?? ((props) => <a {...props} />);
 
   return (
-    <article className={cn('group flex h-full min-w-0 flex-col', className)}>
-      <div className="relative aspect-[4/5] w-full shrink-0 overflow-hidden rounded-sm bg-surface-muted">
+    <article
+      className={cn(
+        'group flex h-full min-w-0 flex-col',
+        layout === 'list' && 'sm:flex-row sm:gap-5',
+        className,
+      )}
+    >
+      <div
+        className={cn(
+          'relative aspect-[4/5] w-full shrink-0 overflow-hidden rounded-sm bg-surface-muted',
+          layout === 'list' && 'sm:w-48',
+        )}
+      >
         <Link href={href} className="absolute inset-0 block">
           <ProductImage
             src={imageUrl}
             alt={name}
-            sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 280px"
+            fallbackKind={imageFallback}
+            sizes={layout === 'list'
+              ? '(max-width: 640px) 50vw, 192px'
+              : '(max-width: 640px) 50vw, (max-width: 1024px) 50vw, (max-width: 1280px) 33vw, 360px'}
+            priority={imagePriority}
             className="absolute inset-0 aspect-auto h-full w-full max-h-none"
           />
         </Link>
@@ -83,22 +103,24 @@ export function ProductCard({
         {favoriteSlot ? <div className="absolute end-3 top-3 z-[2]">{favoriteSlot}</div> : null}
       </div>
 
-      <div className="mt-3 flex min-w-0 flex-1 flex-col gap-2">
+      <div
+        className={cn('mt-3 flex min-w-0 flex-1 flex-col gap-2', layout === 'list' && 'sm:mt-0')}
+      >
         {brandName ? (
           <div className="flex min-w-0 items-center gap-2">
             {brandImageUrl ? (
-              <img
+              <FallbackImage
                 src={brandImageUrl}
                 alt=""
                 className="h-6 w-6 shrink-0 rounded-full object-cover ring-1 ring-border"
+                fallbackSrc="/images/defaults/brand.webp"
               />
             ) : (
-              <span
-                aria-hidden
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[10px] font-medium text-foreground"
-              >
-                {brandName.slice(0, 1).toUpperCase()}
-              </span>
+              <img
+                src="/images/defaults/brand.webp"
+                alt=""
+                className="h-6 w-6 shrink-0 rounded-full object-cover ring-1 ring-border"
+              />
             )}
             <span className="truncate text-xs tracking-wide text-muted-foreground uppercase">
               {brandName}
@@ -123,6 +145,7 @@ export function ProductCard({
             price={priceFrom}
             compareAtPrice={compareAtFrom}
             currency={currency}
+            locale={locale}
             className="text-sm"
           />
         </div>

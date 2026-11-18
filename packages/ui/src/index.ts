@@ -45,7 +45,7 @@ export { LoadingState, Spinner } from './loading-state';
 export { Pagination, type PaginationProps } from './pagination';
 export { ProductBadge, type ProductBadgeProps } from './product-badge';
 export { ProductCard, type ProductCardProps, type ProductCardLabel } from './product-card';
-export { ProductImage, type ProductImageProps } from './product-image';
+export { ProductImage, type ProductImageProps, type DefaultImageKind } from './product-image';
 export { ProductPrice, type ProductPriceProps } from './product-price';
 export { QuantityStepper, type QuantityStepperProps } from './quantity-stepper';
 export { Rating, type RatingProps } from './rating';
@@ -92,3 +92,5 @@ export {
   TooltipTrigger,
 } from './tooltip';
 export { cn } from './lib/cn';
+
+export { FallbackImage } from './fallback-image';

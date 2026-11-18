@@ -2,7 +2,11 @@ import type { Currency } from '@lumea/types';
 import type { HTMLAttributes } from 'react';
 import { cn } from './lib/cn';
 
-function formatAmount(amount: number, currency: string) {
+function formatAmount(amount: number, currency: string, locale?: string) {
+  if (locale?.startsWith('ar')) {
+    const shorthand: Record<string, string> = { TND: 'د.ت', AED: 'د.إ', USD: 'د.أ' };
+    return `${new Intl.NumberFormat(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount / 100)} ${shorthand[currency] ?? currency}`;
+  }
   const locales: Record<string, string> = {
     USD: 'en-US',
     TND: 'fr-TN',
@@ -18,12 +22,14 @@ export type ProductPriceProps = HTMLAttributes<HTMLSpanElement> & {
   price: number;
   compareAtPrice?: number | null;
   currency?: Currency | string;
+  locale?: string;
 };
 
 export function ProductPrice({
   price,
   compareAtPrice,
   currency = 'USD',
+  locale,
   className,
   ...props
 }: ProductPriceProps) {
@@ -32,10 +38,10 @@ export function ProductPrice({
 
   return (
     <span className={cn('inline-flex items-baseline gap-2', className)} {...props}>
-      <span className="font-medium text-foreground">{formatAmount(price, code)}</span>
+      <span className="font-medium text-foreground">{formatAmount(price, code, locale)}</span>
       {onSale && (
         <span className="text-sm text-muted-foreground line-through">
-          {formatAmount(compareAtPrice, code)}
+          {formatAmount(compareAtPrice, code, locale)}
         </span>
       )}
     </span>

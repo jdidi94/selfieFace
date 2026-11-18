@@ -1,4 +1,4 @@
-import { ADMIN_SESSION_COOKIE } from '@/lib/auth-cookies';
+import { ADMIN_SESSION_COOKIE, REFRESH_COOKIE } from '@/lib/auth-cookies';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
@@ -19,7 +19,8 @@ export function middleware(request: NextRequest) {
   }
 
   const session = request.cookies.get(ADMIN_SESSION_COOKIE)?.value;
-  if (!session) {
+  const refresh = request.cookies.get(REFRESH_COOKIE)?.value;
+  if (!session || !refresh) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = '/login';
     return NextResponse.redirect(loginUrl);

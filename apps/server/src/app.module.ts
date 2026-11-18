@@ -20,6 +20,8 @@ import { MerchandisingModule } from './merchandising/merchandising.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProductsModule } from './products/products.module';
 import { SupportModule } from './support/support.module';
+import { TaxonomyModule } from './taxonomy/taxonomy.module';
+import { AdminToolsModule } from './admin-tools/admin-tools.module';
 
 @Module({
   imports: [
@@ -44,7 +46,8 @@ import { SupportModule } from './support/support.module';
     BehaviorModule,
     LoyaltyModule,
     SupportModule,
+    TaxonomyModule,
+    AdminToolsModule,
   ],
 })
 export class AppModule {}
-

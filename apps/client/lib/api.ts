@@ -29,6 +29,7 @@ export const STATIC_REVALIDATE_SECONDS = 300;
 const CATALOG_PREFIXES = [
   '/products',
   '/categories',
+  '/taxonomy',
   '/brands',
   '/merchandising',
   '/content/banners',
@@ -55,6 +56,7 @@ function cacheOptions(path: string): RequestInit['next'] {
     tags.add('categories');
     tags.add('homepage');
   }
+  if (pathname.startsWith('/taxonomy')) tags.add('taxonomy');
   // Full URL (incl. query) is the Next fetch cache key → filters stay separate.
   return {
     revalidate: STATIC_REVALIDATE_SECONDS,

@@ -1,3 +1,4 @@
+import { FallbackImage } from '@lumea/ui';
 import { JournalArticleBody } from '@/components/journal-article-body';
 import { BreadcrumbJsonLd } from '@/components/breadcrumb-json-ld';
 import { ShopProductGrid } from '@/components/shop-product-grid';
@@ -95,14 +96,13 @@ export default async function JournalArticlePage({
         <Link href="/journal" className="text-sm text-muted-foreground hover:underline">
           ← {t.journal}
         </Link>
-        {cover && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={cover}
-            alt=""
-            className="mt-6 aspect-[16/9] w-full rounded-lg object-cover"
-          />
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <FallbackImage
+          src={cover ?? '/images/defaults/journal.webp'}
+          alt=""
+          className="mt-6 aspect-[16/9] w-full rounded-lg object-cover"
+          fallbackSrc="/images/defaults/journal.webp"
+        />
         <h1 className="font-display mt-8 text-4xl leading-tight md:text-5xl">{article.title}</h1>
         {article.excerpt && (
           <p className="mt-4 text-lg text-muted-foreground">{article.excerpt}</p>

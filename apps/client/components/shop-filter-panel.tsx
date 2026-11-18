@@ -17,6 +17,10 @@ const BRANDS_PREVIEW = 3;
 function filterKey(values: ShopFilterValues) {
   return [
     values.q,
+    values.department,
+    values.productType,
+    values.concern,
+    values.ingredient,
     values.category,
     values.problemCategory,
     values.brand,
@@ -62,6 +66,10 @@ function FilterFields({
       {values.problemCategory ? (
         <input type="hidden" name="problemCategory" value={values.problemCategory} />
       ) : null}
+      {values.department ? <input type="hidden" name="department" value={values.department} /> : null}
+      {values.productType ? <input type="hidden" name="productType" value={values.productType} /> : null}
+      {values.concern ? <input type="hidden" name="concern" value={values.concern} /> : null}
+      {values.ingredient ? <input type="hidden" name="ingredient" value={values.ingredient} /> : null}
       <p className="text-sm">
         <Link href="/search" className="text-accent underline-offset-2 hover:underline">
           {t.search}
@@ -102,10 +110,16 @@ function FilterFields({
               value={b.slug}
               defaultChecked={values.brand === b.slug}
             />
-            {b.imageUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={b.imageUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
-            ) : null}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={b.imageUrl || '/images/defaults/brand.webp'}
+              alt=""
+              className="h-5 w-5 rounded-full object-cover"
+              onError={(event) => {
+                event.currentTarget.src = '/images/defaults/brand.webp';
+                event.currentTarget.onerror = null;
+              }}
+            />
             <span>{b.name}</span>
           </label>
         ))}

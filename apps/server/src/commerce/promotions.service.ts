@@ -23,6 +23,7 @@ import {
   CatalogCacheService,
 } from '../common/cache/catalog-cache.service';
 import { ReviewsService } from '../reviews/reviews.service';
+import { AdminProductivityService } from '../admin-tools/admin-productivity.service';
 import { Prisma, ProductStatus } from '@prisma/client';
 
 type PromotionWithProducts = Promotion & {
@@ -46,6 +47,7 @@ export class PromotionsService {
     private readonly catalogCache: CatalogCacheService,
     private readonly reviewsService: ReviewsService,
     private readonly marketsService: MarketsService,
+    private readonly adminProductivity: AdminProductivityService,
   ) {}
 
   private mapPromotion(row: PromotionWithProducts): PromotionDto {
@@ -156,7 +158,7 @@ export class PromotionsService {
     }
   }
 
-  async update(id: string, input: unknown): Promise<PromotionDto> {
+  async update(id: string, input: unknown, adminUserId?: string): Promise<PromotionDto> {
     const existing = await this.prisma.promotion.findUnique({
       where: { id },
       include: { market: true },
@@ -189,6 +191,25 @@ export class PromotionsService {
           include: { products: true, market: true },
         });
       });
+      if (adminUserId) {
+        const fields = ['name', 'slug', 'tag', 'description', 'startsAt', 'endsAt', 'isActive'] as const;
+        for (const field of fields) {
+          const before = existing[field];
+          const after = row[field];
+          if (String(before ?? '') !== String(after ?? '')) {
+            await this.adminProductivity.recordChange({
+              marketId: existing.marketId,
+              adminUserId,
+              entityType: 'PROMOTION',
+              entityId: id,
+              entityName: row.name,
+              field,
+              before,
+              after,
+            });
+          }
+        }
+      }
       await this.catalogCache.invalidateCatalog(parseMarketCode(existing.market.code));
       return this.mapPromotion(row);
     } catch (err) {

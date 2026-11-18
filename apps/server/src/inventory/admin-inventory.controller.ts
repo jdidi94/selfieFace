@@ -7,6 +7,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { UserTypesGuard } from '../auth/guards/user-types.guard';
 import { AdminMarketCode } from '../markets/admin-market.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { RequestUser } from '../auth/auth.types';
 import { InventoryService } from './inventory.service';
 
 @Controller('admin')
@@ -23,13 +25,13 @@ export class AdminInventoryController {
 
   @Patch('variants/:id/inventory')
   @Permissions('inventory.update')
-  adjust(@Param('id') id: string, @Body() body: unknown) {
-    return this.inventoryService.adjust(id, body);
+  adjust(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: RequestUser) {
+    return this.inventoryService.adjust(id, body, user.sub);
   }
 
   @Post('inventory/transfer')
   @Permissions('inventory.update')
-  transfer(@Body() body: unknown) {
-    return this.inventoryService.transfer(body);
+  transfer(@Body() body: unknown, @CurrentUser() user: RequestUser) {
+    return this.inventoryService.transfer(body, user.sub);
   }
 }

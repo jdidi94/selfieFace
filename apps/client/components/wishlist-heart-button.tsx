@@ -2,12 +2,29 @@
 
 import { apiUrl } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
+import { UserType } from '@lumea/types';
 import { useLocale } from '@/lib/locale-context';
 import { getMessages } from '@/lib/messages';
 import { Heart } from 'lucide-react';
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type MouseEvent } from 'react';
+import { useEffect, useState, type MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
+
+// All cards mounted together share one request; results are not cached after completion.
+const wishlistRequests = new Map<string, Promise<string[]>>();
+export function loadWishlistIds(accessToken: string): Promise<string[]> {
+  const existing = wishlistRequests.get(accessToken);
+  if (existing) return existing;
+  const request = fetch(`${apiUrl}/wishlist/ids`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(20_000),
+  }).then(async (res) => {
+    if (!res.ok) throw new Error('Wishlist unavailable');
+    return await res.json() as string[];
+  }).finally(() => { wishlistRequests.delete(accessToken); });
+  wishlistRequests.set(accessToken, request);
+  return request;
+}
 
 export function WishlistHeartButton({
   productId,
@@ -23,27 +40,24 @@ export function WishlistHeartButton({
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState(false);
 
-  const load = useCallback(async () => {
-    if (!accessToken || !user) {
+  useEffect(() => {
+    let active = true;
+    if (!accessToken || user?.type !== UserType.CUSTOMER) {
       setSaved(false);
       return;
     }
-    const res = await fetch(`${apiUrl}/wishlist/ids`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return;
-    const ids = (await res.json()) as string[];
-    setSaved(ids.includes(productId));
-  }, [accessToken, productId, user]);
-
-  useEffect(() => {
-    if (!loading) void load();
-  }, [load, loading]);
+    if (!loading) {
+      void loadWishlistIds(accessToken).then((ids) => {
+        if (active) setSaved(ids.includes(productId));
+      }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [accessToken, productId, user?.type, loading]);
 
   async function toggle(e: MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (!user || !accessToken) {
+    if (!user || user.type !== UserType.CUSTOMER || !accessToken) {
       router.push(`/account/login?next=/wishlist`);
       return;
     }

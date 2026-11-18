@@ -2,19 +2,18 @@
 
 import { CopyToMarketDialog } from '@/components/copy-to-market-dialog';
 import { FormErrorBanner } from '@/components/form-errors';
+import { BulkProductPreview } from '@/components/bulk-product-preview';
+import { SavedFilters } from '@/components/saved-filters';
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
 import { useAdminMarket } from '@/lib/market-context';
-import { submitErrorState, validateWithSchema } from '@/lib/validate-form';
 import type { CatalogCopyResult, ProductListItem, ProductListResponse } from '@lumea/types';
-import { productBulkTagsSchema } from '@lumea/validation';
 import {
   Badge,
   Button,
   Checkbox,
   EmptyState,
   Input,
-  Label,
   LoadingState,
   Pagination,
   Select,
@@ -39,13 +38,6 @@ const STATUS_OPTIONS = [
   { value: 'ARCHIVED', label: 'Archived' },
 ];
 
-function parseTagInput(raw: string): string[] {
-  return raw
-    .split(/[,]+/)
-    .map((t) => t.trim().toLowerCase())
-    .filter(Boolean);
-}
-
 export default function AdminProductsPage() {
   const { accessToken, loading: authLoading } = useAuth();
   const { market } = useAdminMarket();
@@ -57,8 +49,6 @@ export default function AdminProductsPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [tagInput, setTagInput] = useState('');
-  const [bulkPending, setBulkPending] = useState(false);
   const [bulkMessage, setBulkMessage] = useState<string | null>(null);
   const [pendingCopy, setPendingCopy] = useState<ProductListItem | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
@@ -113,46 +103,6 @@ export default function AdminProductsPage() {
       else next.delete(id);
       return next;
     });
-  }
-
-  async function runBulk(mode: 'add' | 'remove') {
-    if (!accessToken) return;
-    const tags = parseTagInput(tagInput);
-    if (!tags.length || selected.size === 0) {
-      setBulkMessage('Select products and enter at least one tag');
-      return;
-    }
-    setBulkPending(true);
-    setBulkMessage(null);
-    setError(null);
-    const payload =
-      mode === 'add'
-        ? { productIds: [...selected], add: tags }
-        : { productIds: [...selected], remove: tags };
-    const validated = validateWithSchema(productBulkTagsSchema, payload);
-    if (!validated.ok) {
-      setBulkMessage(validated.message);
-      setBulkPending(false);
-      return;
-    }
-    try {
-      const result = await adminFetch<{ updated: number }>(
-        '/admin/products/bulk-tags',
-        accessToken,
-        { method: 'POST', body: JSON.stringify(validated.data) },
-      );
-      setBulkMessage(
-        mode === 'add'
-          ? `Added tags on ${result.updated} products`
-          : `Removed tags from ${result.updated} products`,
-      );
-      setTagInput('');
-      await load();
-    } catch (err) {
-      setBulkMessage(submitErrorState(err).message);
-    } finally {
-      setBulkPending(false);
-    }
   }
 
   if (authLoading) return <LoadingState label="Loading products…" />;
@@ -216,38 +166,30 @@ export default function AdminProductsPage() {
         </div>
       </div>
 
+      <SavedFilters
+        entity="PRODUCTS"
+        value={{ q: search, status }}
+        onApply={(filters) => {
+          setQ(filters.q ?? '');
+          setSearch(filters.q ?? '');
+          setStatus(filters.status || 'all');
+          setPage(1);
+        }}
+      />
+
       {selected.size > 0 ? (
-        <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface p-4">
-          <div className="min-w-[220px] flex-1 space-y-2">
-            <Label htmlFor="bulk-tags">Tags for {selected.size} selected</Label>
-            <Input
-              id="bulk-tags"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              placeholder="Comma-separated tags…"
-              disabled={bulkPending}
-            />
+        <div className="space-y-2">
+          <BulkProductPreview
+            productIds={[...selected]}
+            onApplied={(summary) => {
+              setBulkMessage(summary);
+              void load();
+            }}
+          />
+          <div className="flex items-center justify-between">
+            {bulkMessage ? <p role="status" className="text-sm text-muted-foreground">{bulkMessage}</p> : <span />}
+            <Button variant="ghost" onClick={() => setSelected(new Set())}>Clear selection</Button>
           </div>
-          <Button disabled={bulkPending} onClick={() => void runBulk('add')}>
-            Add tags
-          </Button>
-          <Button
-            variant="outline"
-            disabled={bulkPending}
-            onClick={() => void runBulk('remove')}
-          >
-            Remove tags
-          </Button>
-          <Button
-            variant="ghost"
-            disabled={bulkPending}
-            onClick={() => setSelected(new Set())}
-          >
-            Clear selection
-          </Button>
-          {bulkMessage ? (
-            <p className="w-full text-sm text-muted-foreground">{bulkMessage}</p>
-          ) : null}
         </div>
       ) : null}
 

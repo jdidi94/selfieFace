@@ -12,10 +12,12 @@ export function ProductCardActions({
   productId,
   variantId,
   inStock,
+  isIncoming = false,
 }: {
   productId: string;
   variantId?: string | null;
   inStock: boolean;
+  isIncoming?: boolean;
 }) {
   const { addItem } = useCart();
   const { openBag } = useStorefrontPanels();
@@ -26,7 +28,7 @@ export function ProductCardActions({
   const [adding, setAdding] = useState(false);
 
   async function onAdd() {
-    if (!variantId || !inStock) return;
+    if (!variantId || !inStock || isIncoming) return;
     setAdding(true);
     try {
       await addItem(variantId, qty);
@@ -38,7 +40,7 @@ export function ProductCardActions({
     }
   }
 
-  if (!inStock) {
+  if (!inStock || isIncoming) {
     return (
       <div className="space-y-2">
         {!showNotify ? (

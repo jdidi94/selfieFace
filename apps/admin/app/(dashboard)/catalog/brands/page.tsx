@@ -60,6 +60,8 @@ export default function BrandsPage() {
   const [names, setNames] = useState(emptyNames);
   const [imageUrl, setImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [sortOrder, setSortOrder] = useState('0');
+  const [isActive, setIsActive] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -86,6 +88,8 @@ export default function BrandsPage() {
     setNames(emptyNames());
     setImageUrl('');
     setImagePreview(null);
+    setSortOrder('0');
+    setIsActive(true);
     setEditingId(null);
     setError(null);
     setFieldErrors({});
@@ -101,6 +105,8 @@ export default function BrandsPage() {
     setNames(namesFromBrand(item));
     setImageUrl(item.imageUrl ?? '');
     setImagePreview(item.imageUrl ? mediaUrl(item.imageUrl) : null);
+    setSortOrder(String(item.sortOrder ?? 0));
+    setIsActive(item.isActive !== false);
     setError(null);
     setFieldErrors({});
     setOpen(true);
@@ -147,6 +153,8 @@ export default function BrandsPage() {
     const validated = validateWithSchema(brandUpsertSchema, {
       translations,
       imageUrl: imageUrl.trim() || null,
+      sortOrder: Number(sortOrder),
+      isActive,
     });
     if (!validated.ok) {
       setError(validated.message);
@@ -261,6 +269,10 @@ export default function BrandsPage() {
                 placeholder="Or paste image URL /media path"
               />
             </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2"><Label htmlFor="brand-sort-order">Display order</Label><Input id="brand-sort-order" type="number" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} /></div>
+              <label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} />Active in storefront</label>
+            </div>
             <FieldError fieldErrors={fieldErrors} field="translations" />
             <FieldError fieldErrors={fieldErrors} field="imageUrl" />
             <FormErrorBanner message={error} />
@@ -279,6 +291,9 @@ export default function BrandsPage() {
               <TableHead>Name (EN)</TableHead>
               <TableHead>Translations</TableHead>
               <TableHead>Slug</TableHead>
+              <TableHead>Products</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Order</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -286,16 +301,16 @@ export default function BrandsPage() {
             {items.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>
-                  {item.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={mediaUrl(item.imageUrl) ?? item.imageUrl}
-                      alt=""
-                      className="h-10 w-10 rounded object-cover"
-                    />
-                  ) : (
-                    <span className="text-xs text-muted-foreground">—</span>
-                  )}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={mediaUrl(item.imageUrl) || item.imageUrl || '/images/defaults/brand.webp'}
+                    alt=""
+                    className="h-10 w-10 rounded object-cover"
+                    onError={(event) => {
+                      event.currentTarget.src = '/images/defaults/brand.webp';
+                      event.currentTarget.onerror = null;
+                    }}
+                  />
                 </TableCell>
                 <TableCell>{item.name}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">
@@ -304,6 +319,9 @@ export default function BrandsPage() {
                     .join(' · ') || 'EN'}
                 </TableCell>
                 <TableCell>{item.slug}</TableCell>
+                <TableCell>{item.productCount ?? 0}</TableCell>
+                <TableCell>{item.isActive === false ? 'Inactive' : 'Active'}</TableCell>
+                <TableCell>{item.sortOrder ?? 0}</TableCell>
                 <TableCell className="space-x-2 text-right">
                   <Button variant="outline" size="sm" onClick={() => openEdit(item)}>
                     Edit

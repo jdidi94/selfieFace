@@ -1,6 +1,7 @@
 'use client';
 
 import { FormErrorBanner } from '@/components/form-errors';
+import { ContextualHelp } from '@/components/contextual-help';
 import { SettingsSubnav } from '@/components/settings-subnav';
 import { adminFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth-context';
@@ -78,7 +79,7 @@ export default function StoreSettingsPage() {
   ) {
     return (
       <div className="space-y-2">
-        <Label htmlFor={String(key)}>{label}</Label>
+        <Label htmlFor={String(key)}>{label} {key === 'lowStockThreshold' ? <ContextualHelp fieldKey="settings.lowStockThreshold" /> : null}</Label>
         {hint ? <p className="text-xs text-muted-foreground">{hint}</p> : null}
         <Input
           id={String(key)}

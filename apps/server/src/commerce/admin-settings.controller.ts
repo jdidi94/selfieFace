@@ -8,12 +8,16 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { UserTypesGuard } from '../auth/guards/user-types.guard';
 import { AdminMarketCode } from '../markets/admin-market.decorator';
 import { StoreSettingsService } from './store-settings.service';
+import { CheckoutRealtimeService } from './checkout-realtime.service';
 
 @Controller('admin/settings')
 @UseGuards(JwtAuthGuard, UserTypesGuard, PermissionsGuard)
 @UserTypes(UserType.ADMIN)
 export class AdminSettingsController {
-  constructor(private readonly settingsService: StoreSettingsService) {}
+  constructor(
+    private readonly settingsService: StoreSettingsService,
+    private readonly checkoutRealtime: CheckoutRealtimeService,
+  ) {}
 
   @Get()
   @Permissions('orders.read')
@@ -23,7 +27,9 @@ export class AdminSettingsController {
 
   @Patch()
   @Permissions('orders.update')
-  update(@AdminMarketCode() market: MarketCode, @Body() body: unknown) {
-    return this.settingsService.update(body, market);
+  async update(@AdminMarketCode() market: MarketCode, @Body() body: unknown) {
+    const result = await this.settingsService.update(body, market);
+    this.checkoutRealtime.settingsChanged(market);
+    return result;
   }
 }

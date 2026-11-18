@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import {
   Currency,
   InventoryReason,
@@ -23,6 +25,7 @@ import {
 } from '@lumea/validation';
 import { randomBytes } from 'crypto';
 import Stripe from 'stripe';
+import { CatalogCacheService } from '../common/cache/catalog-cache.service';
 import { AddressesService } from '../customers/addresses.service';
 import { LoyaltyService } from '../loyalty/loyalty.service';
 import { MarketsService } from '../markets/markets.service';
@@ -47,8 +50,17 @@ function normalizeEmail(email: string | null | undefined): string | null {
   return trimmed.includes('@') ? trimmed : null;
 }
 
+const STOCK_HOLD_MINUTES = Math.min(
+  60,
+  Math.max(5, Number(process.env.CHECKOUT_STOCK_HOLD_MINUTES) || 15),
+);
+
 @Injectable()
-export class CheckoutService {
+export class CheckoutService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(CheckoutService.name);
+  private expiryTimer?: ReturnType<typeof setInterval>;
+  private expirySweepRunning = false;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly cartService: CartService,
@@ -61,7 +73,67 @@ export class CheckoutService {
     private readonly mail: SesMailService,
     private readonly loyaltyService: LoyaltyService,
     private readonly marketsService: MarketsService,
+    private readonly catalogCache: CatalogCacheService,
   ) {}
+
+  onModuleInit() {
+    void this.expireStockHolds();
+    this.expiryTimer = setInterval(() => void this.expireStockHolds(), 30_000);
+    this.expiryTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.expiryTimer) clearInterval(this.expiryTimer);
+  }
+
+  private async expireStockHolds(): Promise<void> {
+    if (this.expirySweepRunning) return;
+    this.expirySweepRunning = true;
+    try {
+      const expired = await this.prisma.order.findMany({
+        where: {
+          status: OrderStatus.PENDING,
+          paymentStatus: PaymentStatus.UNPAID,
+          stockHoldExpiresAt: { lte: new Date() },
+        },
+        select: { id: true, currency: true, paymentProvider: true, stripePaymentIntentId: true, konnectPaymentRef: true },
+        take: 100,
+        orderBy: { stockHoldExpiresAt: 'asc' },
+      });
+      for (const order of expired) {
+        try {
+          if (order.stripePaymentIntentId) {
+            const settings = await this.settingsService.getByCurrency(order.currency);
+            const stripe = this.stripeClient(this.settingsService.resolveStripeSecret(settings));
+            if (!stripe) continue;
+            const intent = await stripe.paymentIntents.retrieve(order.stripePaymentIntentId);
+            if (intent.status === 'succeeded' || intent.status === 'requires_capture') {
+              await this.finalizePaidOrder(order.id, true);
+              continue;
+            }
+            if (intent.status !== 'canceled') {
+              if (!['requires_payment_method', 'requires_confirmation', 'requires_action'].includes(intent.status)) continue;
+              await stripe.paymentIntents.cancel(intent.id);
+            }
+          } else if (order.konnectPaymentRef) {
+            const settings = await this.settingsService.getByCurrency(order.currency);
+            if (await this.konnectService.isPaymentCompleted(settings, order.konnectPaymentRef)) {
+              await this.finalizePaidOrder(order.id, true);
+              continue;
+            }
+          }
+          await this.ordersService.expireUnpaidStockHold(order.id);
+          await this.catalogCache.invalidateCatalog();
+        } catch (error) {
+          this.logger.warn(`Could not expire stock hold for order ${order.id}: ${error instanceof Error ? error.message : 'unknown error'}`);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Stock hold expiry sweep failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    } finally {
+      this.expirySweepRunning = false;
+    }
+  }
 
   private stripeClient(secret: string | null): Stripe | null {
     if (!secret) return null;
@@ -212,6 +284,25 @@ export class CheckoutService {
       currency: parsed.data.currency as Currency,
     });
 
+    const currency = parsed.data.currency as Currency;
+    const originalLines = new Map(cart.items.map((item) => [item.variantId, item]));
+    const cartChanged =
+      originalLines.size !== cartDto.items.length ||
+      cartDto.items.some((item) => {
+        const original = originalLines.get(item.variantId);
+        if (!original || original.quantity !== item.quantity) return true;
+        const price =
+          original.variant.prices.find((row) => row.currency === currency) ??
+          original.variant.prices.find((row) => row.currency === Currency.USD) ??
+          original.variant.prices[0];
+        return (price?.amount ?? 0) !== item.unitPrice;
+      });
+    if (cartChanged) {
+      throw new BadRequestException(
+        'Cart availability or pricing changed; review your cart before checkout',
+      );
+    }
+
     for (const item of cartDto.items) {
       const variant = await this.prisma.productVariant.findUnique({
         where: { id: item.variantId },
@@ -221,13 +312,13 @@ export class CheckoutService {
         !variant ||
         !variant.isActive ||
         variant.product.status !== ProductStatus.ACTIVE ||
+        variant.product.isIncoming ||
         variant.stock < item.quantity
       ) {
         throw new BadRequestException(`Insufficient stock for ${item.productName}`);
       }
     }
 
-    const currency = parsed.data.currency as Currency;
     const market = await this.marketsService.getByCode(
       marketCodeFromCurrencyValue(currency),
     );
@@ -277,12 +368,50 @@ export class CheckoutService {
       }
     }
 
+    // Fail before creating a pending order when the selected payment route is
+    // unavailable. Admin settings can change while a shopper has checkout open.
+    const requested =
+      parsed.data.paymentMethod === 'CARD'
+        ? 'CARD'
+        : parsed.data.paymentMethod === 'COD'
+          ? 'COD'
+          : isGuest
+            ? 'COD'
+            : 'CARD';
+    if (requested === 'CARD' && isGuest) {
+      throw new UnauthorizedException('Sign in to pay by card');
+    }
+    if (requested === 'COD' && !settings.cashOnDeliveryEnabled) {
+      throw new BadRequestException('Cash on delivery is disabled');
+    }
+    if (requested === 'CARD') {
+      if (!settings.cardPaymentEnabled) {
+        throw new BadRequestException('Card payment is disabled');
+      }
+      const provider = this.settingsService.cardProviderForCurrency(settings, currency);
+      if (!provider) {
+        throw new BadRequestException(
+          currency === Currency.USD || currency === Currency.AED
+            ? 'Stripe card payments are not configured for this currency'
+            : 'Konnect card payments are not configured for this currency',
+        );
+      }
+      if (
+        provider === PaymentProvider.STRIPE &&
+        !this.settingsService.resolveStripeSecret(settings)
+      ) {
+        throw new BadRequestException('Stripe secret key is missing');
+      }
+    }
+
     const shippingPhone =
       shippingAddress.phone?.trim() || contactPhone || null;
 
     let order;
     try {
       order = await this.prisma.$transaction(async (tx) => {
+        const stockReservedAt = new Date();
+        const stockHoldExpiresAt = new Date(stockReservedAt.getTime() + STOCK_HOLD_MINUTES * 60_000);
         const created = await tx.order.create({
           data: {
             number,
@@ -315,6 +444,8 @@ export class CheckoutService {
             couponId,
             couponCode,
             loyaltyPointsRedeemed,
+            stockReservedAt,
+            stockHoldExpiresAt,
             items: {
               create: cartDto.items.map((item) => ({
                 variantId: item.variantId,
@@ -330,6 +461,21 @@ export class CheckoutService {
           include: { items: true },
         });
 
+        // Reserve all cart lines in the order transaction. Each stock decision is
+        // serialized by a ProductVariant row lock, and failure rolls the order back.
+        for (const item of [...created.items].sort((a, b) => a.variantId.localeCompare(b.variantId))) {
+          try {
+            await deductSellableStock(tx, {
+              variantId: item.variantId,
+              quantity: item.quantity,
+              note: `Checkout hold ${created.number} until ${stockHoldExpiresAt.toISOString()}`,
+              orderItemId: item.id,
+            });
+          } catch (error) {
+            throw new BadRequestException(error instanceof Error ? error.message : 'Insufficient stock');
+          }
+        }
+
         if (loyaltyPointsRedeemed > 0) {
           await this.loyaltyService.debitRedeemInTx(tx, {
             customerId,
@@ -341,7 +487,7 @@ export class CheckoutService {
         }
 
         return created;
-      });
+      }, { maxWait: 15_000, timeout: 20_000 });
     } catch (err) {
       // Concurrent retry with the same idempotency key.
       if (
@@ -365,6 +511,8 @@ export class CheckoutService {
       throw err;
     }
 
+    await this.catalogCache.invalidateCatalog(marketCodeFromCurrencyValue(currency));
+
     if (!isGuest && parsed.data.saveAddress && !parsed.data.addressId) {
       await this.addressesService.saveFromShipping(customerId, shippingAddress, {
         label: parsed.data.addressLabel ?? null,
@@ -382,19 +530,6 @@ export class CheckoutService {
           ? 'Order placed — guest'
           : 'Order placed',
     );
-
-    const requested =
-      parsed.data.paymentMethod === 'CARD'
-        ? 'CARD'
-        : parsed.data.paymentMethod === 'COD'
-          ? 'COD'
-          : isGuest
-            ? 'COD'
-            : 'CARD';
-
-    if (requested === 'CARD' && isGuest) {
-      throw new UnauthorizedException('Sign in to pay by card');
-    }
 
     if (requested === 'COD') {
       if (!settings.cashOnDeliveryEnabled) {
@@ -475,6 +610,7 @@ export class CheckoutService {
       failUrl,
       webhookUrl,
       phoneNumber: shippingPhone,
+      lifespan: STOCK_HOLD_MINUTES,
     });
 
     await this.prisma.order.update({
@@ -522,7 +658,7 @@ export class CheckoutService {
     }
 
     if (intent.status === 'succeeded' || intent.status === 'requires_capture') {
-      await this.finalizePaidOrder(order.id);
+      await this.finalizePaidOrder(order.id, true);
       return {
         clientSecret: intent.client_secret,
         paymentIntentId: intent.id,
@@ -587,7 +723,7 @@ export class CheckoutService {
     const settings = await this.settingsService.getByCurrency(order.currency);
     const stripe = this.stripeClient(this.settingsService.resolveStripeSecret(settings));
     if (!stripe) {
-      return this.finalizePaidOrder(order.id);
+      return this.finalizePaidOrder(order.id, true);
     }
 
     const intentId =
@@ -607,7 +743,7 @@ export class CheckoutService {
       throw new BadRequestException('Payment intent does not match order');
     }
 
-    return this.finalizePaidOrder(order.id);
+    return this.finalizePaidOrder(order.id, true);
   }
 
   async confirmKonnectPayment(orderId: string, paymentRef?: string | null): Promise<OrderDto> {
@@ -625,7 +761,7 @@ export class CheckoutService {
       where: { id: orderId },
       data: { konnectPaymentRef: paymentRef },
     });
-    return this.finalizePaidOrder(orderId);
+    return this.finalizePaidOrder(orderId, true);
   }
 
   async handleKonnectWebhook(paymentRef: string): Promise<{ ok: boolean; orderId?: string }> {
@@ -772,6 +908,7 @@ export class CheckoutService {
     }> = [];
     const result = await this.prisma.$transaction(
       async (tx) => {
+        await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
         const current = await tx.order.findUniqueOrThrow({
           where: { id: orderId },
           include: { items: true },
@@ -783,7 +920,11 @@ export class CheckoutService {
           return current;
         }
 
-        for (const item of current.items) {
+        if (current.stockReservedAt && current.stockHoldExpiresAt && current.stockHoldExpiresAt <= new Date()) {
+          throw new BadRequestException('The stock hold expired. Please place your order again.');
+        }
+
+        for (const item of current.stockReservedAt ? [] : current.items) {
           try {
             const events = await deductSellableStock(tx, {
               variantId: item.variantId,
@@ -817,6 +958,8 @@ export class CheckoutService {
           data: {
             paymentStatus: PaymentStatus.AUTHORIZED,
             status: OrderStatus.PROCESSING,
+            stockCommittedAt: current.stockReservedAt ? new Date() : current.stockCommittedAt,
+            stockHoldExpiresAt: null,
           },
           include: { items: true },
         });
@@ -843,7 +986,7 @@ export class CheckoutService {
         newlyFinalized = true;
         return updated;
       },
-      { maxWait: 10_000, timeout: 20_000 },
+      { maxWait: 15_000, timeout: 60_000 },
     );
 
     if (newlyFinalized) {
@@ -855,7 +998,7 @@ export class CheckoutService {
     return result;
   }
 
-  private async finalizePaidOrder(orderId: string): Promise<OrderDto> {
+  private async finalizePaidOrder(orderId: string, providerConfirmed = false): Promise<OrderDto> {
     let newlyFinalized = false;
     const lowStockEvents: Array<{
       previousStock: number;
@@ -865,13 +1008,21 @@ export class CheckoutService {
       productName: string;
     }> = [];
     const order = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "Order" WHERE "id" = ${orderId} FOR UPDATE`;
       const current = await tx.order.findUniqueOrThrow({
         where: { id: orderId },
         include: { items: true },
       });
       if (current.paymentStatus === PaymentStatus.CAPTURED) return current;
 
-      for (const item of current.items) {
+      if (current.status === OrderStatus.CANCELLED) {
+        throw new BadRequestException('This order was cancelled after its stock hold expired.');
+      }
+      if (current.stockReservedAt && current.stockHoldExpiresAt && current.stockHoldExpiresAt <= new Date() && !providerConfirmed) {
+        throw new BadRequestException('The stock hold expired. Please place your order again.');
+      }
+
+      for (const item of current.stockReservedAt ? [] : current.items) {
         try {
           const events = await deductSellableStock(tx, {
             variantId: item.variantId,
@@ -905,6 +1056,8 @@ export class CheckoutService {
         data: {
           paymentStatus: PaymentStatus.CAPTURED,
           status: OrderStatus.PROCESSING,
+          stockCommittedAt: current.stockReservedAt ? new Date() : current.stockCommittedAt,
+          stockHoldExpiresAt: null,
         },
         include: { items: true },
       });
@@ -930,7 +1083,7 @@ export class CheckoutService {
 
       newlyFinalized = true;
       return updated;
-    }, { maxWait: 10_000, timeout: 20_000 });
+    }, { maxWait: 15_000, timeout: 60_000 });
 
     if (newlyFinalized) {
       void this.orderMail.sendConfirmation(orderId);

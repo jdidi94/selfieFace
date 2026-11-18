@@ -260,10 +260,16 @@ export default function JournalEditPage() {
               if (file) void uploadCover(file);
             }}
           />
-          {coverPreview ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={coverPreview} alt="" className="mt-2 max-h-40 rounded-md object-cover" />
-          ) : null}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={coverPreview ?? '/images/defaults/journal.webp'}
+            alt=""
+            className="mt-2 max-h-40 rounded-md object-cover"
+            onError={(event) => {
+              event.currentTarget.src = '/images/defaults/journal.webp';
+              event.currentTarget.onerror = null;
+            }}
+          />
           <Label className="text-xs text-muted-foreground">Or paste media ID</Label>
           <Input
             value={coverMediaId}

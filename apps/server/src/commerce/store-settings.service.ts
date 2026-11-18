@@ -502,6 +502,9 @@ export class StoreSettingsService {
       customerOrderEmailsEnabled: s.customerOrderEmailsEnabled,
       adminOrderEmailsEnabled: s.adminOrderEmailsEnabled,
       adminStockEmailsEnabled: s.adminStockEmailsEnabled,
+      adminHelpNotesEnabled: s.adminHelpNotesEnabled,
+      adminInsightsEnabled: s.adminInsightsEnabled,
+      adminInsightEmailsEnabled: s.adminInsightEmailsEnabled,
       shippingMethods: methods.map((m): ShippingMethodDto => ({
         id: m.id,
         code: m.code,

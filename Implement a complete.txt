@@ -1,0 +1,338 @@
+Implement a complete, scalable cosmetics taxonomy/navigation system based on the provided Freya.tn reference screenshot.
+
+FIRST inspect the existing project before coding:
+- Prisma schema and relations
+- Product/Brand/Category models
+- API/services/repositories
+- admin architecture
+- Shop page/navigation/filtering
+- existing caching system
+- existing seed system
+- existing i18n/translation system
+- existing SEO/routing architecture
+
+Do not rewrite unrelated code or create duplicate architecture. Reuse existing patterns.
+
+## TAXONOMY
+
+Do NOT build only Category → Subcategory.
+
+Use these independent concepts:
+
+Department
+- Visage
+- Cheveux
+- Bain & Corps
+- Korean
+
+ProductType
+- e.g. Nettoyants, Crèmes Hydratantes, Sérums, Lotions, Exfoliants, Masques, Solaires
+
+SkinConcern
+- e.g. Peaux sèches, Peaux acnéiques, Points noirs, Pores dilatés, Cernes, Tâches brunes, Peaux ternes, Rides, Rougeurs
+
+Ingredient
+- e.g. Acide Hyaluronique, Niacinamide, AHA, BHA, Vitamine C, Rétinoïdes, Peptides, SPF
+
+Brand
+- e.g. COSRX, Anua, Beauty of Joseon, SKIN1004, La Roche-Posay, Dr Althea, The Ordinary, Laneige
+
+Products should have proper Prisma relations:
+Department → Products
+Product ↔ ProductType
+Product ↔ SkinConcern
+Product ↔ Ingredient
+Product → Brand
+
+Use proper relational/junction tables, not comma-separated strings or JSON arrays for searchable relationships.
+
+## TRANSLATION / I18N
+
+Strictly respect the existing translation system.
+
+- Never hardcode user-facing taxonomy labels.
+- All departments, product types, concerns, ingredients, brands and UI labels must support the project's existing locales.
+- Follow the existing translation/schema conventions.
+- Search must work with translated names.
+- URLs/slugs must follow the existing localized routing/SEO strategy.
+- Test both LTR and RTL languages.
+- Horizontal navigation, arrows, breadcrumbs and back navigation must correctly follow text direction.
+
+## ADMIN
+
+Update the existing admin.
+
+Admins must be able to:
+- manage Departments
+- manage ProductTypes
+- manage SkinConcerns
+- manage Ingredients
+- manage Brands
+- assign/remove taxonomy relationships from products
+- reorder navigation items
+- activate/deactivate items
+
+Allow navigation between levels in admin, for example:
+
+Department → related ProductTypes → products
+Department → related SkinConcerns → products
+ProductType → related products
+Ingredient → related products
+Brand → related products
+
+Show useful product counts and prevent invalid/orphaned relationships.
+
+Respect existing admin permissions, validation and UI architecture.
+
+## SHOP NAVIGATION
+
+Update the Shop page to use the database-driven taxonomy.
+
+Top navigation should support:
+
+Visage | Cheveux | Bain & Corps | Korean
+
+When a taxonomy item has children/next-level options:
+- clicking it reveals the next level
+- do not immediately filter if another level exists
+
+When there is no next level:
+- clicking it filters the products
+
+Allow the user to navigate backwards with a clear arrow/back control.
+
+Show hierarchy visually using subtle different borders/colors/backgrounds while keeping the design premium and consistent.
+
+Example:
+
+Visage
+  → Soins Visage
+      → Sérums
+          → products
+
+The system must support returning:
+
+Sérums ← Soins Visage ← Visage
+
+## HORIZONTAL TAXONOMY NAVIGATION
+
+Taxonomy labels must be horizontally scrollable.
+
+- Respect LTR/RTL direction.
+- Make scrolling obvious.
+- Show subtle scroll indicators.
+- Show arrows when useful.
+- On mobile, make arrows/touch scrolling clear and accessible.
+- Do not create horizontal overflow that breaks the page layout.
+
+## FILTERING
+
+Support combined filters:
+
+Department
++ ProductType
++ SkinConcern
++ Ingredient
++ Brand
+
+Example:
+
+Visage + Sérums + Niacinamide + Peaux acnéiques + COSRX
+
+Use efficient Prisma queries and avoid N+1 queries.
+
+Provide:
+- active filter chips
+- remove individual filter
+- clear all
+- correct empty states
+- product counts where useful
+
+## SEARCH
+
+Upgrade the Shop search to search across:
+
+- Products
+- Departments
+- ProductTypes
+- SkinConcerns
+- Ingredients
+- Brands
+
+Group results by type and clearly identify each result.
+
+Example:
+
+Products
+  COSRX Snail Serum
+
+Categories
+  Visage
+
+Product Types
+  Sérums
+
+Ingredients
+  Niacinamide
+
+Brands
+  COSRX
+
+Skin Concerns
+  Peaux acnéiques
+
+Clicking taxonomy results should navigate/filter correctly.
+Clicking products should open the product page.
+
+Use debounced search/autocomplete where appropriate.
+Do not download the entire product catalog to the browser.
+
+## URL / STATE
+
+Taxonomy/filter state must be reflected in stable, shareable URLs.
+
+- Browser back/forward must work.
+- Refresh must preserve state.
+- Deep links must work.
+- Use slugs, never database IDs.
+- Integrate with existing routing/SEO architecture.
+
+## CACHING
+
+Audit the existing caching system before changing it.
+
+Do not introduce Redis or another infrastructure if the existing system is sufficient.
+
+Cache relatively static taxonomy/navigation data.
+
+Centralize cache keys.
+
+Invalidate relevant caches when:
+- taxonomy changes
+- translations change
+- ordering changes
+- active state changes
+- product-taxonomy relationships change
+
+Avoid clearing the entire cache unnecessarily.
+
+Also review search/product-filter caching for stale results.
+
+## PRISMA + SEEDS
+
+Update Prisma schema/migrations according to the existing architecture.
+
+Use:
+- proper foreign keys
+- many-to-many junction tables
+- useful indexes
+- unique stable slugs
+
+Refactor seeds so they are:
+- deterministic
+- idempotent
+- repeatable
+- independent of generated IDs
+
+Seed order:
+
+1. Departments
+2. ProductTypes
+3. SkinConcerns
+4. Ingredients
+5. Brands
+6. Products
+7. Product relationships
+
+Use stable slugs/upserts.
+
+Running the seed multiple times must not create duplicates.
+
+Do not destroy production data with normal seeding.
+
+## UX / ACCESSIBILITY
+
+Handle:
+- loading states
+- empty states
+- no-search-results
+- inactive/deleted taxonomy
+- invalid filters
+- keyboard navigation
+- visible focus states
+- accessible arrow/button labels
+- mobile touch interaction
+
+Always make clear:
+WHERE AM I?
+WHAT CAN I SELECT?
+WHAT FILTERS ARE ACTIVE?
+HOW DO I GO BACK?
+
+Keep animations subtle and premium.
+
+## SEO
+
+Integrate with the existing SEO system.
+
+Support:
+- stable taxonomy URLs
+- localized metadata where supported
+- canonical URLs
+- no duplicate URLs caused by filter ordering
+
+Do not create a separate SEO architecture.
+
+## WINDOWS
+
+Everything must work on Windows.
+
+Avoid:
+- Bash-only syntax
+- Unix-only paths
+- Linux-specific shell commands
+- shell-dependent scripts
+
+Use existing package scripts and cross-platform Node/Prisma commands.
+
+## VERIFICATION
+
+Run where available:
+
+npx prisma validate
+npx prisma generate
+npx prisma migrate dev
+npx prisma db seed
+npm test
+npm run lint
+npm run build
+
+Also verify:
+
+Admin taxonomy management
+→ Prisma
+→ API
+→ cache invalidation
+→ Shop navigation
+→ progressive taxonomy levels
+→ filtering
+→ search
+→ URL state
+→ LTR/RTL
+→ mobile scrolling
+
+Run the seed multiple times and verify no duplicates or broken relations.
+
+At the end provide:
+- files changed
+- Prisma/schema changes
+- API changes
+- admin changes
+- Shop/UX changes
+- caching changes
+- seed changes
+- tests/checks actually executed
+
+Mark every verification as PASSED, FAILED, or NOT RUN.
+
+Never claim something passed unless you actually executed it.

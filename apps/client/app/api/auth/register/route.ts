@@ -1,6 +1,6 @@
 import { setRefreshCookie } from '@/lib/auth-cookies';
 import { nestFetch, nestJson } from '@/lib/nest-api';
-import type { AuthSession } from '@lumea/types';
+import { UserType, type AuthSession } from '@lumea/types';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -21,6 +21,10 @@ export async function POST(request: Request) {
       { message: (data as { message?: string }).message ?? 'Registration failed' },
       { status: 502 },
     );
+  }
+
+  if (session.user.type !== UserType.CUSTOMER) {
+    return NextResponse.json({ message: 'Customer access only' }, { status: 403 });
   }
 
   const response = NextResponse.json({

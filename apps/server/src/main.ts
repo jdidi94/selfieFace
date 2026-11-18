@@ -9,7 +9,17 @@ import { AppModule } from './app.module';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 import { HttpCacheHeadersInterceptor } from './common/interceptors/http-cache-headers.interceptor';
 import { Reflector } from '@nestjs/core';
-import { ADMIN_MARKET_HEADER } from './markets/market.util';
+import {
+  ADMIN_MARKET_HEADER,
+  marketCodeFromCurrencyValue,
+  parseMarketCode,
+} from './markets/market.util';
+import { JwtService } from '@nestjs/jwt';
+import { UserType } from '@prisma/client';
+import { Server } from 'socket.io';
+import { PrismaService } from './prisma/prisma.service';
+import { AdminNotificationsService } from './admin-tools/admin-notifications.service';
+import { CheckoutRealtimeService } from './commerce/checkout-realtime.service';
 
 function parseOrigins(): string[] {
   const fromEnv = process.env.CORS_ORIGINS?.split(',')
@@ -57,6 +67,37 @@ async function bootstrap() {
 
   const port = Number(process.env.PORT ?? 4000);
   await app.listen(port);
+  const io = new Server(app.getHttpServer(), { cors: { origin: origins, credentials: true } });
+  const jwt = app.get(JwtService);
+  const prisma = app.get(PrismaService);
+  const notifications = app.get(AdminNotificationsService);
+  const checkoutRealtime = app.get(CheckoutRealtimeService);
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token;
+      if (typeof token !== 'string' || !token) return next(new Error('Unauthorized'));
+      const claims = await jwt.verifyAsync<{ sub: string; type: string }>(token);
+      if (claims.type !== UserType.ADMIN) return next(new Error('Unauthorized'));
+      const user = await prisma.user.findUnique({ where: { id: claims.sub }, select: { type: true, blockedAt: true } });
+      if (!user || user.type !== UserType.ADMIN || user.blockedAt) return next(new Error('Unauthorized'));
+      socket.data.marketCode = parseMarketCode(socket.handshake.auth?.market);
+      next();
+    } catch {
+      next(new Error('Unauthorized'));
+    }
+  });
+  io.on('connection', (socket) => socket.join(`market:${socket.data.marketCode}`));
+  notifications.attachSocket(io);
+  const storefrontCheckout = io.of('/storefront-checkout');
+  storefrontCheckout.on('connection', (socket) => {
+    const currency =
+      typeof socket.handshake.auth?.currency === 'string'
+        ? socket.handshake.auth.currency
+        : 'USD';
+    const marketCode = marketCodeFromCurrencyValue(currency);
+    socket.join(`checkout:${marketCode}`);
+  });
+  checkoutRealtime.attach(storefrontCheckout);
   // eslint-disable-next-line no-console
   console.log(`Selfieface API listening on http://localhost:${port}/api`);
 }

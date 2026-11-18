@@ -13,6 +13,13 @@ import { formatMoney } from '@lumea/utils';
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 
+type OperationsData = {
+  ordersNeedingAction: number;
+  lowStock: number;
+  failedEmailsLast7Days: number;
+  unresolvedCustomerIssues: number;
+};
+
 function formatRevenueBuckets(
   rows: { currency: Currency; revenue: number }[],
 ) {
@@ -25,17 +32,20 @@ export default function AdminHomePage() {
   const [data, setData] = useState<AdminDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [operations, setOperations] = useState<OperationsData | null>(null);
 
   const load = useCallback(async () => {
     if (!accessToken) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await adminFetch<AdminDashboardResponse>(
-        '/admin/dashboard?days=30',
-        accessToken,
-      );
-      setData(result);
+      const [result, ops] = await Promise.allSettled([
+        adminFetch<AdminDashboardResponse>('/admin/dashboard?days=30', accessToken),
+        adminFetch<OperationsData>('/admin/operations-dashboard', accessToken, { skipCache: true }),
+      ]);
+      if (result.status === 'rejected') throw result.reason;
+      setData(result.value);
+      setOperations(ops.status === 'fulfilled' ? ops.value : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load dashboard');
       setData(null);
@@ -115,6 +125,28 @@ export default function AdminHomePage() {
       )}
 
       <ApiHealth />
+
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="font-display text-2xl">Daily operations</h2>
+            <p className="text-sm text-muted-foreground">Work queues that may need attention today.</p>
+          </div>
+          <Link href="/change-history" className="text-sm underline underline-offset-2">View change history</Link>
+        </div>
+        {operations ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { label: 'Orders to act on', count: operations.ordersNeedingAction, href: '/orders?status=PROCESSING', action: 'Open orders' },
+            { label: 'Low stock', count: operations.lowStock, href: '/catalog/inventory', action: 'Open inventory' },
+            { label: 'Failed emails · 7 days', count: operations.failedEmailsLast7Days, href: '/marketing/email-logs?status=FAILED', action: 'Open email logs' },
+            { label: 'Unresolved customer issues', count: operations.unresolvedCustomerIssues, href: '/support/tickets', action: 'Open tickets' },
+          ].map((card) => <div key={card.label} className="rounded-lg border border-border bg-surface p-4">
+            <p className="text-sm text-muted-foreground">{card.label}</p>
+            <p className="mt-2 text-2xl font-medium">{card.count}</p>
+            <Link href={card.href} className="mt-2 inline-block text-xs underline underline-offset-2">{card.action}</Link>
+          </div>)}
+        </div> : <p className="text-sm text-muted-foreground">Operations data is unavailable.</p>}
+      </section>
     </div>
   );
 }

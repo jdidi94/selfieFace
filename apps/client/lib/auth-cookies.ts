@@ -1,6 +1,9 @@
 import type { NextResponse } from 'next/server';
 
-export const REFRESH_COOKIE = 'refreshToken';
+// Storefront and admin apps can share a hostname in development. Keep their
+// rotating refresh sessions in separate cookies so one app cannot replace the
+// other app's identity.
+export const REFRESH_COOKIE = 'selfieface_customer_refresh';
 const MAX_AGE = 60 * 60 * 24 * 7;
 
 export function setRefreshCookie(response: NextResponse, refreshToken: string) {

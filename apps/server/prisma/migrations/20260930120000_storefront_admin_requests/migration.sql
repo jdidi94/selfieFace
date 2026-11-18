@@ -13,9 +13,9 @@ ALTER TABLE "Category"
 
 CREATE TABLE "_ProductProblems" (
   "A" TEXT NOT NULL,
-  "B" TEXT NOT NULL
+  "B" TEXT NOT NULL,
+  CONSTRAINT "_ProductProblems_AB_pkey" PRIMARY KEY ("A", "B")
 );
-CREATE UNIQUE INDEX "_ProductProblems_AB_unique" ON "_ProductProblems"("A", "B");
 CREATE INDEX "_ProductProblems_B_index" ON "_ProductProblems"("B");
 ALTER TABLE "_ProductProblems"
   ADD CONSTRAINT "_ProductProblems_A_fkey"

@@ -14,6 +14,7 @@ export const CACHE_PREFIX = {
   categories: 'categories:',
   brands: 'brands:',
   banners: 'banners:',
+  taxonomy: 'taxonomy:',
 } as const;
 
 @Injectable()
@@ -59,7 +60,7 @@ export class CatalogCacheService {
       return;
     }
 
-    const tags = ['catalog', 'homepage', 'categories', 'seo'];
+    const tags = ['catalog', 'homepage', 'categories', 'taxonomy', 'seo'];
     if (market) {
       tags.push(catalogMarketTag(market));
     } else {
