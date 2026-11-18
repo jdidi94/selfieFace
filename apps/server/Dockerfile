@@ -10,6 +10,10 @@ COPY packages/types/package.json packages/types/
 COPY packages/validation/package.json packages/validation/
 COPY packages/config/package.json packages/config/
 COPY packages/utils/package.json packages/utils/
+# The root postinstall builds workspace packages and generates Prisma Client.
+# Include their sources and schema before install so that postinstall can run.
+COPY packages/ packages/
+COPY apps/server/prisma/ apps/server/prisma/
 RUN pnpm install --frozen-lockfile --filter @lumea/server...
 
 FROM deps AS build
