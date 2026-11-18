@@ -56,8 +56,6 @@ export class SesMailService {
       process.env.ADMIN_NOTIFY_EMAIL?.trim() ||
       null;
 
-    const accessKeyId = process.env.AWS_ACCESS_KEY_ID?.trim();
-    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY?.trim();
     const fromEmailValid = Boolean(this.fromEmail && this.fromEmail.includes('@'));
     if (this.fromEmail && !fromEmailValid) {
       this.logger.error(
@@ -65,16 +63,15 @@ export class SesMailService {
       );
     }
 
-    if (fromEmailValid && region && accessKeyId && secretAccessKey) {
-      this.client = new SESClient({
-        region,
-        credentials: { accessKeyId, secretAccessKey },
-      });
+    if (fromEmailValid && region) {
+      // Let the AWS SDK resolve credentials from the default provider chain:
+      // local environment variables in development, and the ECS task role in AWS.
+      this.client = new SESClient({ region });
       this.logger.log(`SES mail enabled (region=${region}, from=${this.fromEmail})`);
     } else {
       this.client = null;
       this.logger.warn(
-        'SES not configured — transactional mail will no-op. Set AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, SES_FROM_EMAIL (full email with @).',
+        'SES not configured — transactional mail will no-op. Set AWS_REGION and SES_FROM_EMAIL (full email with @); provide AWS credentials through the local environment or an AWS IAM role.',
       );
     }
   }
