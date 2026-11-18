@@ -32,7 +32,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -S lumea && adduser -S lumea -G lumea
 RUN mkdir -p /app/uploads && chown lumea:lumea /app/uploads
-COPY --from=build /app/apps/server/dist ./dist
+COPY --from=build /app/apps/server/dist ./apps/server/dist
 COPY --from=build /app/apps/server/package.json ./package.json
 COPY --from=build /app/apps/server/prisma ./prisma
 COPY --from=build /app/node_modules ./node_modules
@@ -41,4 +41,4 @@ USER lumea
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:4000/api/health/live || exit 1
-CMD ["node", "dist/main.js"]
+CMD ["node", "apps/server/dist/main.js"]
